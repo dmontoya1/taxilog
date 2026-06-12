@@ -1,0 +1,169 @@
+@import 'tailwindcss';
+
+/* ============================================================
+   TaxiLog — tema "taxímetro nocturno"
+   Asfalto casi negro + ámbar taxi como único acento.
+   Firma visual: cifras estilo taxímetro y franja de cuadros.
+   ============================================================ */
+
+:root {
+  --bg: #0b0c0e;
+  --surface: #15171b;
+  --surface-2: #1d2025;
+  --line: #2a2e35;
+  --amber: #ffb400;
+  --amber-deep: #cc8f00;
+  --amber-soft: rgba(255, 180, 0, 0.1);
+  --text: #ededee;
+  --muted: #9ba0a8;
+  --green: #3fd68b;
+  --red: #ff5d5d;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-amber: var(--amber);
+  --color-amber-deep: var(--amber-deep);
+  --color-amber-soft: var(--amber-soft);
+  --color-foreground: var(--text);
+  --color-muted: var(--muted);
+  --color-ok: var(--green);
+  --color-bad: var(--red);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-meter: var(--font-meter);
+}
+
+html {
+  background: var(--bg);
+  color-scheme: dark;
+}
+
+body {
+  background:
+    radial-gradient(60rem 30rem at 50% -10rem, rgba(255, 180, 0, 0.05), transparent 60%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font-body), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+}
+
+/* ---------- Firma: cifras de taxímetro ---------- */
+.taximeter {
+  font-family: var(--font-meter), monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--amber);
+  text-shadow: 0 0 18px rgba(255, 180, 0, 0.35);
+  letter-spacing: 0.02em;
+}
+
+.taximeter--ok {
+  color: var(--green);
+  text-shadow: 0 0 18px rgba(63, 214, 139, 0.3);
+}
+
+.taximeter--bad {
+  color: var(--red);
+  text-shadow: 0 0 18px rgba(255, 93, 93, 0.3);
+}
+
+/* ---------- Firma: franja de cuadros taxi ---------- */
+.checker {
+  height: 8px;
+  background:
+    repeating-conic-gradient(var(--amber) 0% 25%, transparent 0% 50%)
+    0 0 / 16px 8px;
+  opacity: 0.85;
+}
+
+/* ---------- Tarjetas ---------- */
+.card {
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+/* ---------- Inputs de monto ---------- */
+.amount-input {
+  font-family: var(--font-meter), monospace;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  color: var(--text);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.amount-input:focus {
+  outline: none;
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-soft);
+}
+
+/* ---------- Botón principal ---------- */
+.btn-amber {
+  background: linear-gradient(180deg, var(--amber), var(--amber-deep));
+  color: #1a1405;
+  font-weight: 700;
+  border-radius: 0.85rem;
+  transition: transform 0.1s ease, filter 0.15s ease;
+}
+
+.btn-amber:active {
+  transform: scale(0.97);
+}
+
+.btn-amber:disabled {
+  filter: grayscale(0.6) brightness(0.7);
+}
+
+/* ---------- Animaciones ---------- */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rise-in {
+  animation: rise-in 0.35s ease both;
+}
+
+.rise-in-2 {
+  animation: rise-in 0.35s ease 0.08s both;
+}
+
+.rise-in-3 {
+  animation: rise-in 0.35s ease 0.16s both;
+}
+
+@keyframes pulse-save {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 180, 0, 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 18px rgba(255, 180, 0, 0);
+  }
+}
+
+.pulse-save {
+  animation: pulse-save 0.6s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise-in,
+  .rise-in-2,
+  .rise-in-3,
+  .pulse-save {
+    animation: none;
+  }
+}
