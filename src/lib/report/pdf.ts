@@ -116,11 +116,14 @@ export function buildReportPdf({ driverName, from, to, days, summary }: ReportIn
   // ---------- Balance final ----------
   const by = y + 8 + lines.length * 6 + 6;
   const owesBoss = summary.balance > 0;
-  doc.setFillColor(...(owesBoss ? ([255, 240, 214] as const) : ([222, 247, 233] as const)));
+  const boxBg: [number, number, number] = owesBoss ? [255, 240, 214] : [222, 247, 233];
+  const boxText: [number, number, number] = owesBoss ? amber : [22, 130, 80];
+
+  doc.setFillColor(...boxBg);
   doc.roundedRect(14, by - 6, 126, 14, 2, 2, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
-  doc.setTextColor(...(owesBoss ? amber : ([22, 130, 80] as [number, number, number])));
+  doc.setTextColor(...boxText);
   doc.text(
     summary.balance === 0
       ? 'Período en paz: nadie debe nada.'
