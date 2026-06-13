@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
   euro,
+  getActiveAgreement,
   getRangeTransactions,
+  getReportPreferences,
   getSettlementDays,
   groupTransactionsByDay,
   monthRange,
@@ -89,11 +91,21 @@ export default function InformesPage() {
     if (!days || !summary) return;
     setExporting('boss');
     try {
-      const [{ buildReportPdf, sharePdf }, driverName] = await Promise.all([
+      const [{ buildReportPdf, sharePdf }, driverName, prefs, agreement] = await Promise.all([
         import('@/lib/report/pdf'),
         getDriverName(),
+        getReportPreferences(supabase),
+        getActiveAgreement(supabase, to),
       ]);
-      const doc = buildReportPdf({ driverName, from, to, days, summary });
+      const doc = buildReportPdf({
+        driverName,
+        from,
+        to,
+        days,
+        summary,
+        prefs,
+        cardGoesToBoss: agreement?.card_goes_to_boss ?? true,
+      });
       await sharePdf(doc, `liquidacion_${from}_${to}.pdf`);
     } catch {
       setError('No se pudo generar el PDF. Inténtalo de nuevo.');

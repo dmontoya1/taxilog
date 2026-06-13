@@ -8,6 +8,7 @@ export interface AgreementConfig {
   fee_value: number;
   weekday_rest: 1 | 2 | 3 | 4 | 5;
   weekend_work_parity: 'even' | 'odd';
+  card_goes_to_boss: boolean;
   valid_from: string;
   valid_to: string | null;
 }
@@ -26,13 +27,38 @@ export interface SettlementSummary {
 export interface SettlementDay {
   d: string; // YYYY-MM-DD
   cash: number;
-  card: number;
+  card: number;         // datáfono total del día
+  card_to_boss: number; // parte del datáfono que el jefe efectivamente cobró
   gross: number;
   expense_total: number;
   boss_expense_share: number;
   is_rest: boolean;
   is_exempt: boolean;
   boss_fee: number;
+}
+
+export interface ReportPreferences {
+  show_cash: boolean;
+  show_expenses: boolean;
+  show_rest_days: boolean;
+  signature_name: string | null;
+}
+
+export const DEFAULT_REPORT_PREFS: ReportPreferences = {
+  show_cash: true,
+  show_expenses: true,
+  show_rest_days: true,
+  signature_name: null,
+};
+
+export async function getReportPreferences(
+  supabase: SupabaseClient,
+): Promise<ReportPreferences> {
+  const { data } = await supabase
+    .from('report_preferences')
+    .select('show_cash, show_expenses, show_rest_days, signature_name')
+    .maybeSingle<ReportPreferences>();
+  return data ?? DEFAULT_REPORT_PREFS;
 }
 
 /** Desglose día a día del período. La lógica vive en Postgres (settlement_days). */
@@ -51,6 +77,7 @@ export async function getSettlementDays(
     ...d,
     cash: Number(d.cash),
     card: Number(d.card),
+    card_to_boss: Number(d.card_to_boss),
     gross: Number(d.gross),
     expense_total: Number(d.expense_total),
     boss_expense_share: Number(d.boss_expense_share),
@@ -62,6 +89,7 @@ export async function getSettlementDays(
 export function summarizeDays(days: SettlementDay[]): SettlementSummary {
   const total_cash = days.reduce((s, d) => s + d.cash, 0);
   const total_card = days.reduce((s, d) => s + d.card, 0);
+  const card_to_boss = days.reduce((s, d) => s + d.card_to_boss, 0);
   const boss_due = days.reduce((s, d) => s + d.boss_fee, 0);
   const boss_expense_share = days.reduce((s, d) => s + d.boss_expense_share, 0);
   return {
@@ -69,9 +97,9 @@ export function summarizeDays(days: SettlementDay[]): SettlementSummary {
     total_card,
     total_gross: total_cash + total_card,
     boss_due: round2(boss_due),
-    boss_received: total_card,
+    boss_received: round2(card_to_boss),
     boss_expense_share: round2(boss_expense_share),
-    balance: round2(boss_due - total_card - boss_expense_share),
+    balance: round2(boss_due - card_to_boss - boss_expense_share),
   };
 }
 

@@ -2,6 +2,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type {
   DayTransactions,
+  ReportPreferences,
   SettlementDay,
   SettlementSummary,
   TransactionKind,
@@ -28,10 +29,20 @@ export interface ReportInput {
   to: string;
   days: SettlementDay[];
   summary: SettlementSummary;
+  prefs: ReportPreferences;
+  cardGoesToBoss: boolean;
 }
 
 /** Construye el informe de liquidación para el jefe. Devuelve el documento. */
-export function buildReportPdf({ driverName, from, to, days, summary }: ReportInput): jsPDF {
+export function buildReportPdf({
+  driverName,
+  from,
+  to,
+  days,
+  summary,
+  prefs,
+  cardGoesToBoss,
+}: ReportInput): jsPDF {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const amber: [number, number, number] = [204, 143, 0];
   const dark: [number, number, number] = [25, 27, 31];
@@ -47,36 +58,56 @@ export function buildReportPdf({ driverName, from, to, days, summary }: ReportIn
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.text(
-    `${driverName} · ${longDate.format(parseLocal(from))} — ${longDate.format(parseLocal(to))}`,
+    `${prefs.signature_name ?? driverName} · ${longDate.format(parseLocal(from))} — ${longDate.format(parseLocal(to))}`,
     14,
     21,
   );
 
-  // ---------- Tabla día a día ----------
+  // ---------- Tabla día a día (columnas dinámicas según preferencias) ----------
+  const visibleDays = prefs.show_rest_days ? days : days.filter((d) => !d.is_rest);
+
+  type Col = { header: string; render: (day: SettlementDay) => string; align?: 'right' };
+  const columns: Col[] = [
+    { header: 'Día', render: (day) => shortDate.format(parseLocal(day.d)) },
+  ];
+  if (prefs.show_cash) {
+    columns.push({ header: 'Efectivo', render: (day) => eur(day.cash), align: 'right' });
+  }
+  columns.push({ header: 'Datáfono', render: (day) => eur(day.card), align: 'right' });
+  if (prefs.show_cash) {
+    columns.push({ header: 'Bruto', render: (day) => eur(day.gross), align: 'right' });
+  }
+  if (prefs.show_expenses) {
+    columns.push({
+      header: 'Gastos jefe',
+      render: (day) => (day.boss_expense_share > 0 ? eur(day.boss_expense_share) : '—'),
+      align: 'right',
+    });
+  }
+  columns.push({
+    header: 'Cuota jefe',
+    render: (day) => (day.is_rest ? '—' : day.is_exempt ? 'Exento' : eur(day.boss_fee)),
+    align: 'right',
+  });
+  columns.push({
+    header: 'Estado',
+    render: (day) => (day.is_rest ? 'Descanso' : day.is_exempt ? 'Libre trabajado' : 'Trabajado'),
+  });
+
+  const columnStyles: Record<number, { halign: 'right' }> = {};
+  columns.forEach((c, i) => {
+    if (c.align === 'right') columnStyles[i] = { halign: 'right' };
+  });
+
   autoTable(doc, {
     startY: 36,
-    head: [['Día', 'Efectivo', 'Datáfono', 'Bruto', 'Gastos jefe', 'Cuota jefe', 'Estado']],
-    body: days.map((day) => [
-      shortDate.format(parseLocal(day.d)),
-      eur(day.cash),
-      eur(day.card),
-      eur(day.gross),
-      day.boss_expense_share > 0 ? eur(day.boss_expense_share) : '—',
-      day.is_rest ? '—' : day.is_exempt ? 'Exento' : eur(day.boss_fee),
-      day.is_rest ? 'Descanso' : day.is_exempt ? 'Libre trabajado' : 'Trabajado',
-    ]),
+    head: [columns.map((c) => c.header)],
+    body: visibleDays.map((day) => columns.map((c) => c.render(day))),
     styles: { fontSize: 8.5, cellPadding: 2 },
     headStyles: { fillColor: dark, textColor: [255, 180, 0], fontStyle: 'bold' },
-    columnStyles: {
-      1: { halign: 'right' },
-      2: { halign: 'right' },
-      3: { halign: 'right' },
-      4: { halign: 'right' },
-      5: { halign: 'right' },
-    },
+    columnStyles,
     didParseCell: (data) => {
-      // Filas de descanso en gris para lectura rápida
-      if (data.section === 'body' && days[data.row.index]?.is_rest) {
+      if (data.section === 'body' && visibleDays[data.row.index]?.is_rest) {
         data.cell.styles.textColor = [150, 150, 150];
       }
     },
@@ -97,13 +128,17 @@ export function buildReportPdf({ driverName, from, to, days, summary }: ReportIn
   doc.setFontSize(12);
   doc.text('Resumen del período', 14, y);
 
-  const lines: Array<[string, string]> = [
-    ['Total efectivo', eur(summary.total_cash)],
-    ['Total datáfono (recibido por el jefe)', eur(summary.total_card)],
-    ['Total bruto', eur(summary.total_gross)],
-    ['Corresponde al jefe (cuotas)', eur(summary.boss_due)],
-    ['Gastos asumidos por el jefe', eur(summary.boss_expense_share)],
-  ];
+  const lines: Array<[string, string]> = [];
+  if (prefs.show_cash) lines.push(['Total efectivo', eur(summary.total_cash)]);
+  lines.push([
+    cardGoesToBoss ? 'Total datáfono (recibido por el jefe)' : 'Total datáfono',
+    eur(summary.total_card),
+  ]);
+  if (prefs.show_cash) lines.push(['Total bruto', eur(summary.total_gross)]);
+  lines.push(['Corresponde al jefe (cuotas)', eur(summary.boss_due)]);
+  if (prefs.show_expenses && summary.boss_expense_share > 0) {
+    lines.push(['Gastos asumidos por el jefe', eur(summary.boss_expense_share)]);
+  }
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);

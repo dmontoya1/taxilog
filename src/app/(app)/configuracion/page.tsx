@@ -4,7 +4,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { toIsoDate } from '@/lib/domain/rest-days';
-import { getActiveAgreement, type FeeType } from '@/lib/domain/settlement';
+import {
+  DEFAULT_REPORT_PREFS,
+  getActiveAgreement,
+  getReportPreferences,
+  type FeeType,
+  type ReportPreferences,
+} from '@/lib/domain/settlement';
 
 const WEEKDAYS = [
   { value: 1, label: 'Lunes' },
@@ -20,15 +26,47 @@ const DEFAULT_CATEGORIES = [
   { name: 'Otros', default_boss_share: 0 },
 ];
 
+function Toggle({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center justify-between gap-3 rounded-xl bg-bg px-4 py-3">
+      <span className="text-sm">
+        {label}
+        {hint && <span className="block text-xs text-muted">{hint}</span>}
+      </span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-5 w-5 accent-[var(--amber)]"
+      />
+    </label>
+  );
+}
+
 export default function ConfiguracionPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
+  // ---------- Acuerdo ----------
   const [feeType, setFeeType] = useState<FeeType>('fixed');
   const [feeValue, setFeeValue] = useState('100');
   const [weekdayRest, setWeekdayRest] = useState(1);
   const [parity, setParity] = useState<'even' | 'odd'>('even');
+  const [cardGoesToBoss, setCardGoesToBoss] = useState(true);
   const [validFrom, setValidFrom] = useState(() => toIsoDate(new Date()));
+
+  // ---------- Preferencias de informe ----------
+  const [prefs, setPrefs] = useState<ReportPreferences>(DEFAULT_REPORT_PREFS);
 
   const [hasExisting, setHasExisting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -36,14 +74,19 @@ export default function ConfiguracionPage() {
 
   useEffect(() => {
     (async () => {
-      const current = await getActiveAgreement(supabase, toIsoDate(new Date()));
+      const [current, savedPrefs] = await Promise.all([
+        getActiveAgreement(supabase, toIsoDate(new Date())),
+        getReportPreferences(supabase),
+      ]);
       if (current) {
         setHasExisting(true);
         setFeeType(current.fee_type);
         setFeeValue(String(current.fee_value));
         setWeekdayRest(current.weekday_rest);
         setParity(current.weekend_work_parity);
+        setCardGoesToBoss(current.card_goes_to_boss);
       }
+      setPrefs(savedPrefs);
     })();
   }, [supabase]);
 
@@ -76,6 +119,7 @@ export default function ConfiguracionPage() {
       fee_value: Number(feeValue),
       weekday_rest: weekdayRest,
       weekend_work_parity: parity,
+      card_goes_to_boss: cardGoesToBoss,
       valid_from: validFrom,
     });
 
@@ -85,7 +129,19 @@ export default function ConfiguracionPage() {
       return;
     }
 
-    // Primera configuración: sembrar categorías de gasto básicas.
+    // Preferencias del informe (1:1 con el usuario)
+    await supabase.from('report_preferences').upsert(
+      {
+        user_id: userId,
+        show_cash: prefs.show_cash,
+        show_expenses: prefs.show_expenses,
+        show_rest_days: prefs.show_rest_days,
+        signature_name: prefs.signature_name?.trim() || null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' },
+    );
+
     if (!hasExisting) {
       await supabase
         .from('expense_categories')
@@ -101,17 +157,21 @@ export default function ConfiguracionPage() {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="rise-in font-[family-name:var(--font-display)] text-2xl font-bold">
-        Acuerdo con el jefe
+        Configuración
       </h1>
       {hasExisting && (
         <p className="rise-in text-sm text-muted">
-          Si cambias algo, el acuerdo anterior se conserva: los días pasados se
+          Si cambias el acuerdo, el anterior se conserva: los días pasados se
           siguen calculando con las condiciones que tenían entonces.
         </p>
       )}
 
-      {/* ---------- Tipo de cuota ---------- */}
-      <section className="card rise-in-2 flex flex-col gap-4 p-5">
+      {/* ---------- Acuerdo con el jefe ---------- */}
+      <h2 className="rise-in mt-2 text-xs uppercase tracking-widest text-muted">
+        Acuerdo con el jefe
+      </h2>
+
+      <section className="card rise-in flex flex-col gap-4 p-5">
         <div className="grid grid-cols-2 gap-2">
           {(
             [
@@ -155,10 +215,21 @@ export default function ConfiguracionPage() {
             </span>
           </div>
         </label>
+
+        <Toggle
+          label="El datáfono lo cobra el jefe"
+          hint="Si está activo, los cobros con tarjeta se descuentan del balance porque el jefe ya los recibió."
+          checked={cardGoesToBoss}
+          onChange={setCardGoesToBoss}
+        />
       </section>
 
       {/* ---------- Descansos ---------- */}
-      <section className="card rise-in-3 flex flex-col gap-4 p-5">
+      <h2 className="rise-in-2 mt-2 text-xs uppercase tracking-widest text-muted">
+        Descansos
+      </h2>
+
+      <section className="card rise-in-2 flex flex-col gap-4 p-5">
         <label className="flex flex-col gap-1.5">
           <span className="text-sm text-muted">Día fijo de descanso (lun–vie)</span>
           <select
@@ -197,11 +268,6 @@ export default function ConfiguracionPage() {
               </button>
             ))}
           </div>
-          <p className="mt-1 text-xs text-muted">
-            Se mira el número del día del mes. Si sábado y domingo caen 31 y 1,
-            quien trabaja el par descansa ambos, y quien trabaja el impar trabaja
-            ambos.
-          </p>
         </div>
 
         <label className="flex flex-col gap-1.5">
@@ -215,10 +281,47 @@ export default function ConfiguracionPage() {
         </label>
       </section>
 
+      {/* ---------- Preferencias del informe del jefe ---------- */}
+      <h2 className="rise-in-3 mt-2 text-xs uppercase tracking-widest text-muted">
+        Informe para el jefe
+      </h2>
+
+      <section className="card rise-in-3 flex flex-col gap-3 p-5">
+        <Toggle
+          label="Mostrar ingresos en efectivo"
+          hint="Desactívalo si prefieres que el jefe no vea el efectivo."
+          checked={prefs.show_cash}
+          onChange={(v) => setPrefs({ ...prefs, show_cash: v })}
+        />
+        <Toggle
+          label="Mostrar gastos a cargo del jefe"
+          hint="Solo aplica a gastos con un % asumido por el jefe."
+          checked={prefs.show_expenses}
+          onChange={(v) => setPrefs({ ...prefs, show_expenses: v })}
+        />
+        <Toggle
+          label="Incluir días de descanso en la tabla"
+          hint="Si lo desactivas, solo aparecen los días con trabajo."
+          checked={prefs.show_rest_days}
+          onChange={(v) => setPrefs({ ...prefs, show_rest_days: v })}
+        />
+
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm text-muted">Nombre que aparecerá en el informe (opcional)</span>
+          <input
+            type="text"
+            value={prefs.signature_name ?? ''}
+            onChange={(e) => setPrefs({ ...prefs, signature_name: e.target.value })}
+            placeholder="Por defecto: tu nombre de cuenta"
+            className="amount-input px-4 py-3 text-base"
+          />
+        </label>
+      </section>
+
       {error && <p className="text-center text-sm text-bad">{error}</p>}
 
       <button onClick={handleSave} disabled={saving} className="btn-amber py-4 text-lg">
-        {saving ? 'Guardando…' : 'Guardar acuerdo'}
+        {saving ? 'Guardando…' : 'Guardar cambios'}
       </button>
     </div>
   );
