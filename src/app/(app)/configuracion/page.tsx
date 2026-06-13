@@ -6,9 +6,15 @@ import { createClient } from '@/lib/supabase/client';
 import { toIsoDate } from '@/lib/domain/rest-days';
 import {
   DEFAULT_REPORT_PREFS,
+  euro,
   getActiveAgreement,
+  getOdometerTotals,
   getReportPreferences,
+  km,
+  setOdometerTotals,
+  formatMinutes,
   type FeeType,
+  type OdometerTotals,
   type ReportPreferences,
 } from '@/lib/domain/settlement';
 
@@ -68,15 +74,37 @@ export default function ConfiguracionPage() {
   // ---------- Preferencias de informe ----------
   const [prefs, setPrefs] = useState<ReportPreferences>(DEFAULT_REPORT_PREFS);
 
+  // ---------- Acumulado del taxímetro (opcional) ----------
+  const ODO_FIELDS = useMemo(
+    () =>
+      [
+        ['total_carreras', 'Carreras totales', '€'],
+        ['total_suplementos', 'Suplementos totales', '€'],
+        ['dist_total', 'Dist. Total', 'km'],
+        ['dist_ocupado', 'Dist. Ocupado', 'km'],
+        ['dist_libre', 'Dist. Libre', 'km'],
+        ['dist_off', 'Dist. OFF', 'km'],
+        ['tiempo_ocupado', 'Tiempo Ocupado', 'min'],
+        ['tiempo_on', 'Tiempo ON', 'min'],
+        ['num_servicios', 'Nº Servicios', ''],
+      ] as Array<[keyof OdometerTotals, string, string]>,
+    [],
+  );
+  const [odo, setOdo] = useState<Record<keyof OdometerTotals, string>>(
+    Object.fromEntries(ODO_FIELDS.map(([k]) => [k, ''])) as Record<keyof OdometerTotals, string>,
+  );
+  const [odoOpen, setOdoOpen] = useState(false);
+
   const [hasExisting, setHasExisting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      const [current, savedPrefs] = await Promise.all([
+      const [current, savedPrefs, totals] = await Promise.all([
         getActiveAgreement(supabase, toIsoDate(new Date())),
         getReportPreferences(supabase),
+        getOdometerTotals(supabase),
       ]);
       if (current) {
         setHasExisting(true);
@@ -87,7 +115,16 @@ export default function ConfiguracionPage() {
         setCardGoesToBoss(current.card_goes_to_boss);
       }
       setPrefs(savedPrefs);
+      if (totals) {
+        setOdo(
+          Object.fromEntries(
+            ODO_FIELDS.map(([k]) => [k, totals[k] ? String(totals[k]) : '']),
+          ) as Record<keyof OdometerTotals, string>,
+        );
+        setOdoOpen(true);
+      }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
 
   async function handleSave() {
@@ -164,6 +201,24 @@ export default function ConfiguracionPage() {
           DEFAULT_CATEGORIES.map((c) => ({ ...c, user_id: userId })),
           { onConflict: 'user_id,name', ignoreDuplicates: true },
         );
+    }
+
+    // Acumulado del taxímetro: solo si el usuario abrió la sección y puso algo
+    const anyOdo = ODO_FIELDS.some(([k]) => odo[k] !== '');
+    if (anyOdo) {
+      try {
+        await setOdometerTotals(
+          supabase,
+          userId,
+          Object.fromEntries(
+            ODO_FIELDS.map(([k]) => [k, Number(odo[k]) || 0]),
+          ) as unknown as OdometerTotals,
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Error guardando el acumulado.');
+        setSaving(false);
+        return;
+      }
     }
 
     router.replace('/registro');
@@ -334,6 +389,50 @@ export default function ConfiguracionPage() {
       </section>
 
       {error && <p className="text-center text-sm text-bad">{error}</p>}
+
+      {/* ---------- Acumulado del taxímetro (opcional) ---------- */}
+      <h2 className="mt-2 text-xs uppercase tracking-widest text-muted">
+        Datos del taxímetro (opcional)
+      </h2>
+
+      <section className="card flex flex-col gap-3 p-5">
+        {!odoOpen ? (
+          <button
+            type="button"
+            onClick={() => setOdoOpen(true)}
+            className="rounded-xl border border-line px-4 py-3 text-sm font-semibold text-muted transition-colors hover:border-amber hover:text-amber"
+          >
+            + Añadir totales históricos del taxi
+          </button>
+        ) : (
+          <>
+            <p className="text-xs text-muted">
+              Totales acumulados del taxímetro. No afectan el cuadre con el jefe;
+              son solo tus estadísticas. Cada cierre de día se suma aquí.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              {ODO_FIELDS.map(([key, label, unit]) => (
+                <label key={key} className="flex flex-col gap-1.5">
+                  <span className="text-xs text-muted">
+                    {label}
+                    {unit && ` (${unit})`}
+                  </span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step={unit === '€' ? '0.01' : unit === 'km' ? '0.1' : '1'}
+                    placeholder="—"
+                    value={odo[key]}
+                    onChange={(e) => setOdo({ ...odo, [key]: e.target.value })}
+                    className="amount-input px-3 py-2.5 text-base"
+                  />
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
 
       <button onClick={handleSave} disabled={saving} className="btn-amber py-4 text-lg">
         {saving ? 'Guardando…' : 'Guardar cambios'}

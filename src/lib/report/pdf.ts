@@ -207,12 +207,14 @@ export async function sharePdf(doc: jsPDF, filename: string): Promise<void> {
 const KIND_COLOR: Record<TransactionKind, [number, number, number]> = {
   cash: [22, 130, 80], // verde
   card: [176, 122, 0], // ámbar oscuro (legible sobre blanco)
+  emisora: [120, 86, 200], // morado (distinto del datáfono)
   expense: [192, 52, 52], // rojo
 };
 
 const KIND_LABEL: Record<TransactionKind, string> = {
   cash: 'Efectivo',
   card: 'Datáfono',
+  emisora: 'Emisora',
   expense: 'Gasto',
 };
 

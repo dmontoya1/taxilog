@@ -10,9 +10,11 @@ import {
   getSettlement,
   monthRange,
   type AgreementConfig,
+  type IncomeMethod,
   type SettlementSummary,
 } from '@/lib/domain/settlement';
 import { useCountUp } from '../use-count-up';
+import { CloseDaySheet } from './close-day-sheet';
 
 const DAY_LABEL = new Intl.DateTimeFormat('es-ES', {
   weekday: 'long',
@@ -20,11 +22,9 @@ const DAY_LABEL = new Intl.DateTimeFormat('es-ES', {
   month: 'long',
 });
 
-type Method = 'cash' | 'card';
-
 interface IncomeEntry {
   id: string;
-  method: Method;
+  method: IncomeMethod;
   amount: number;
   notes: string | null;
   created_at: string;
@@ -39,35 +39,46 @@ interface DayExpense {
   category: { name: string } | null;
 }
 
-/** Movimiento unificado del día para la lista (ingresos + gastos). */
-type Movement =
-  | { kind: 'cash' | 'card'; id: string; amount: number; label: string; createdAt: string }
-  | { kind: 'expense'; id: string; amount: number; label: string; createdAt: string };
+type MovementKind = IncomeMethod | 'expense';
 
-const MOVEMENT_STYLE: Record<
-  Movement['kind'],
-  { icon: string; tint: string; sign: string }
-> = {
+interface Movement {
+  kind: MovementKind;
+  id: string;
+  amount: number;
+  label: string;
+  createdAt: string;
+}
+
+const MOVEMENT_STYLE: Record<MovementKind, { icon: string; tint: string; sign: string }> = {
   cash: { icon: '💶', tint: 'text-ok', sign: '+' },
   card: { icon: '💳', tint: 'text-amber', sign: '+' },
+  emisora: { icon: '📻', tint: 'text-amber', sign: '+' },
   expense: { icon: '⛽', tint: 'text-bad', sign: '−' },
 };
+
+const METHOD_TABS: Array<[IncomeMethod, string]> = [
+  ['cash', '💶 Efectivo'],
+  ['card', '💳 Datáfono'],
+  ['emisora', '📻 Emisora'],
+];
 
 export default function RegistroPage() {
   const supabase = useMemo(() => createClient(), []);
 
   const [date, setDate] = useState(() => toIsoDate(new Date()));
-  const [method, setMethod] = useState<Method>('cash');
+  const [method, setMethod] = useState<IncomeMethod>('cash');
   const [amount, setAmount] = useState('');
 
   const [entries, setEntries] = useState<IncomeEntry[]>([]);
   const [dayExpenses, setDayExpenses] = useState<DayExpense[]>([]);
   const [isRest, setIsRest] = useState(false);
   const [isFeeExempt, setIsFeeExempt] = useState(false);
+  const [dayClosed, setDayClosed] = useState(false);
 
   const [agreement, setAgreement] = useState<AgreementConfig | null | undefined>();
   const [settlement, setSettlement] = useState<SettlementSummary | null>(null);
   const [saving, setSaving] = useState(false);
+  const [showCloseSheet, setShowCloseSheet] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const localDay = parseLocalDate(date);
@@ -78,7 +89,6 @@ export default function RegistroPage() {
       weekendWorkParity: agreement.weekend_work_parity,
     });
 
-  // ---------- Carga del día seleccionado ----------
   const refreshSettlement = useCallback(async () => {
     const d = parseLocalDate(date);
     const [from, to] = monthRange(d.getFullYear(), d.getMonth() + 1);
@@ -102,7 +112,7 @@ export default function RegistroPage() {
           .order('created_at', { ascending: false }),
         supabase
           .from('daily_records')
-          .select('is_rest_day, is_fee_exempt')
+          .select('is_rest_day, is_fee_exempt, day_closed')
           .eq('work_date', date)
           .maybeSingle(),
       ]);
@@ -112,6 +122,7 @@ export default function RegistroPage() {
       setDayExpenses((expensesRes.data as unknown as DayExpense[]) ?? []);
       setIsRest(flagsRes.data?.is_rest_day ?? false);
       setIsFeeExempt(flagsRes.data?.is_fee_exempt ?? false);
+      setDayClosed(flagsRes.data?.day_closed ?? false);
 
       await refreshSettlement();
     } catch (e) {
@@ -123,7 +134,6 @@ export default function RegistroPage() {
     void loadDay();
   }, [loadDay]);
 
-  // ---------- Añadir una transacción ----------
   async function handleAddEntry() {
     const value = Number(amount);
     if (!value || value <= 0) {
@@ -152,13 +162,12 @@ export default function RegistroPage() {
     await loadDay();
   }
 
-  async function handleDeleteEntry(kind: Movement['kind'], id: string) {
+  async function handleDeleteEntry(kind: MovementKind, id: string) {
     const table = kind === 'expense' ? 'expenses' : 'income_entries';
     await supabase.from(table).delete().eq('id', id);
     await loadDay();
   }
 
-  // ---------- Flags del día: persisten al instante ----------
   async function persistFlags(rest: boolean, exempt: boolean) {
     const { data: userData } = await supabase.auth.getUser();
     await supabase.from('daily_records').upsert(
@@ -173,14 +182,16 @@ export default function RegistroPage() {
     await refreshSettlement();
   }
 
-  // ---------- Totales y vista previa de cuota ----------
   const totalCash = entries
     .filter((e) => e.method === 'cash')
     .reduce((s, e) => s + Number(e.amount), 0);
   const totalCard = entries
     .filter((e) => e.method === 'card')
     .reduce((s, e) => s + Number(e.amount), 0);
-  const gross = totalCash + totalCard;
+  const totalEmisora = entries
+    .filter((e) => e.method === 'emisora')
+    .reduce((s, e) => s + Number(e.amount), 0);
+  const gross = totalCash + totalCard + totalEmisora;
 
   const dayFee =
     isRest || isFeeExempt || !agreement
@@ -189,12 +200,18 @@ export default function RegistroPage() {
         ? agreement.fee_value
         : (gross * agreement.fee_value) / 100;
 
+  const incomeLabel: Record<IncomeMethod, string> = {
+    cash: 'Efectivo',
+    card: 'Datáfono',
+    emisora: 'Emisora',
+  };
+
   const movements: Movement[] = [
     ...entries.map<Movement>((e) => ({
       kind: e.method,
       id: e.id,
       amount: Number(e.amount),
-      label: e.method === 'cash' ? 'Efectivo' : 'Datáfono',
+      label: incomeLabel[e.method],
       createdAt: e.created_at,
     })),
     ...dayExpenses.map<Movement>((e) => ({
@@ -264,6 +281,9 @@ export default function RegistroPage() {
                 Según tu acuerdo, este día te tocaba descansar
               </p>
             )}
+            {dayClosed && (
+              <p className="mt-0.5 text-xs text-ok">✓ Día cerrado</p>
+            )}
           </div>
           <input
             type="date"
@@ -311,18 +331,13 @@ export default function RegistroPage() {
       {/* ---------- Añadir transacción ---------- */}
       {!isRest && (
         <section className="card rise-in-3 flex flex-col gap-4 p-5">
-          <div className="grid grid-cols-2 gap-2">
-            {(
-              [
-                ['cash', '💶 Efectivo'],
-                ['card', '💳 Datáfono'],
-              ] as const
-            ).map(([value, label]) => (
+          <div className="grid grid-cols-3 gap-2">
+            {METHOD_TABS.map(([value, label]) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => setMethod(value)}
-                className={`rounded-xl border px-4 py-3 text-sm font-semibold transition-colors ${
+                className={`rounded-xl border px-2 py-3 text-xs font-semibold transition-colors ${
                   method === value
                     ? 'border-amber bg-amber-soft text-amber'
                     : 'border-line text-muted'
@@ -356,18 +371,22 @@ export default function RegistroPage() {
           </div>
 
           {/* ---------- Totales del día ---------- */}
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-xl bg-bg px-2 py-3">
-              <p className="text-xs text-muted">💶 Efectivo</p>
-              <p className="taximeter mt-1 text-sm">{euro.format(totalCash)}</p>
+          <div className="grid grid-cols-4 gap-2 text-center">
+            <div className="rounded-xl bg-bg px-1 py-3">
+              <p className="text-xs text-muted">💶</p>
+              <p className="taximeter mt-1 text-xs">{euro.format(totalCash)}</p>
             </div>
-            <div className="rounded-xl bg-bg px-2 py-3">
-              <p className="text-xs text-muted">💳 Datáfono</p>
-              <p className="taximeter mt-1 text-sm">{euro.format(totalCard)}</p>
+            <div className="rounded-xl bg-bg px-1 py-3">
+              <p className="text-xs text-muted">💳</p>
+              <p className="taximeter mt-1 text-xs">{euro.format(totalCard)}</p>
             </div>
-            <div className="rounded-xl bg-bg px-2 py-3">
-              <p className="text-xs text-muted">Cuota jefe</p>
-              <p className="taximeter mt-1 text-sm">
+            <div className="rounded-xl bg-bg px-1 py-3">
+              <p className="text-xs text-muted">📻</p>
+              <p className="taximeter mt-1 text-xs">{euro.format(totalEmisora)}</p>
+            </div>
+            <div className="rounded-xl bg-bg px-1 py-3">
+              <p className="text-xs text-muted">Jefe</p>
+              <p className="taximeter mt-1 text-xs">
                 {isFeeExempt ? 'Exento' : euro.format(dayFee)}
               </p>
             </div>
@@ -419,6 +438,32 @@ export default function RegistroPage() {
             );
           })}
         </section>
+      )}
+
+      {/* ---------- Cerrar día ---------- */}
+      {!isRest && (
+        <button
+          onClick={() => setShowCloseSheet(true)}
+          className={`mt-2 rounded-[0.85rem] border py-4 text-base font-bold transition-transform active:scale-[0.98] ${
+            dayClosed
+              ? 'border-ok text-ok'
+              : 'border-amber text-amber'
+          }`}
+        >
+          {dayClosed ? '✓ Editar cierre del día' : '🏁 Cerrar día'}
+        </button>
+      )}
+
+      {showCloseSheet && (
+        <CloseDaySheet
+          date={date}
+          registeredTotal={gross}
+          onClose={() => setShowCloseSheet(false)}
+          onClosed={async () => {
+            setShowCloseSheet(false);
+            await loadDay();
+          }}
+        />
       )}
     </div>
   );

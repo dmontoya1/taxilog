@@ -27,6 +27,7 @@ const TIME_LABEL = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '
 const KIND_UI: Record<TransactionKind, { icon: string; tint: string; sign: string }> = {
   cash: { icon: '💶', tint: 'text-ok', sign: '+' },
   card: { icon: '💳', tint: 'text-amber', sign: '+' },
+  emisora: { icon: '📻', tint: 'text-amber', sign: '+' },
   expense: { icon: '⛽', tint: 'text-bad', sign: '−' },
 };
 

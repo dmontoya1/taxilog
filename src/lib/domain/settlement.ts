@@ -2,6 +2,34 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type FeeType = 'fixed' | 'percentage';
 
+/** Método de ingreso. 'card' (datáfono) y 'emisora' van al jefe. */
+export type IncomeMethod = 'cash' | 'card' | 'emisora';
+
+export interface OdometerTotals {
+  total_carreras: number;
+  total_suplementos: number;
+  dist_total: number;
+  dist_ocupado: number;
+  dist_libre: number;
+  dist_off: number;
+  tiempo_ocupado: number; // minutos
+  tiempo_on: number; // minutos
+  num_servicios: number;
+}
+
+/** Lecturas del taxímetro al cerrar el día (las "P" del recibo). */
+export interface DayClosure {
+  p_num_servicios: number | null;
+  p_carreras: number | null;
+  p_suplementos: number | null;
+  p_dist_total: number | null;
+  p_dist_ocupado: number | null;
+  p_dist_libre: number | null;
+  p_dist_off: number | null;
+  p_tiempo_ocupado: number | null;
+  p_tiempo_on: number | null;
+}
+
 export interface AgreementConfig {
   id: string;
   fee_type: FeeType;
@@ -107,7 +135,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // ---------- Transacciones crudas del período (informe detallado) ----------
 
-export type TransactionKind = 'cash' | 'card' | 'expense';
+export type TransactionKind = 'cash' | 'card' | 'emisora' | 'expense';
 
 export interface RangeTransaction {
   kind: TransactionKind;
@@ -144,7 +172,7 @@ export async function getRangeTransactions(
   type IncRow = {
     id: string;
     entry_date: string;
-    method: 'cash' | 'card';
+    method: IncomeMethod;
     amount: number;
     notes: string | null;
     created_at: string;
@@ -159,13 +187,19 @@ export async function getRangeTransactions(
     category: { name: string } | null;
   };
 
+  const incomeLabel: Record<IncomeMethod, string> = {
+    cash: 'Efectivo',
+    card: 'Datáfono',
+    emisora: 'Emisora',
+  };
+
   const incomes = (inc.data as IncRow[]).map<RangeTransaction>((e) => ({
     kind: e.method,
     id: e.id,
     date: e.entry_date,
     createdAt: e.created_at,
     amount: Number(e.amount),
-    label: e.method === 'cash' ? 'Efectivo' : 'Datáfono',
+    label: incomeLabel[e.method],
     notes: e.notes,
   }));
 
@@ -259,4 +293,94 @@ export function monthRange(year: number, month: number): [string, string] {
 export const euro = new Intl.NumberFormat('es-ES', {
   style: 'currency',
   currency: 'EUR',
+});
+
+// ---------- Taxímetro: acumulado histórico y cierre de día ----------
+
+export async function getOdometerTotals(
+  supabase: SupabaseClient,
+): Promise<OdometerTotals | null> {
+  const { data, error } = await supabase
+    .from('odometer_totals')
+    .select(
+      'total_carreras, total_suplementos, dist_total, dist_ocupado, dist_libre, dist_off, tiempo_ocupado, tiempo_on, num_servicios',
+    )
+    .maybeSingle<OdometerTotals>();
+  if (error) throw new Error(`Error leyendo el acumulado: ${error.message}`);
+  return data
+    ? {
+        total_carreras: Number(data.total_carreras),
+        total_suplementos: Number(data.total_suplementos),
+        dist_total: Number(data.dist_total),
+        dist_ocupado: Number(data.dist_ocupado),
+        dist_libre: Number(data.dist_libre),
+        dist_off: Number(data.dist_off),
+        tiempo_ocupado: Number(data.tiempo_ocupado),
+        tiempo_on: Number(data.tiempo_on),
+        num_servicios: Number(data.num_servicios),
+      }
+    : null;
+}
+
+/** Siembra el acumulado inicial (onboarding). Upsert: reemplaza valores. */
+export async function setOdometerTotals(
+  supabase: SupabaseClient,
+  userId: string,
+  totals: OdometerTotals,
+): Promise<void> {
+  const { error } = await supabase
+    .from('odometer_totals')
+    .upsert({ user_id: userId, ...totals, updated_at: new Date().toISOString() }, {
+      onConflict: 'user_id',
+    });
+  if (error) throw new Error(`Error guardando el acumulado: ${error.message}`);
+}
+
+/** Lectura del cierre de un día concreto (si existe). */
+export async function getDayClosure(
+  supabase: SupabaseClient,
+  date: string,
+): Promise<(DayClosure & { day_closed: boolean }) | null> {
+  const { data, error } = await supabase
+    .from('daily_records')
+    .select(
+      'day_closed, p_num_servicios, p_carreras, p_suplementos, p_dist_total, p_dist_ocupado, p_dist_libre, p_dist_off, p_tiempo_ocupado, p_tiempo_on',
+    )
+    .eq('work_date', date)
+    .maybeSingle<DayClosure & { day_closed: boolean }>();
+  if (error) throw new Error(`Error leyendo el cierre: ${error.message}`);
+  return data;
+}
+
+/** Cierra el día vía RPC: guarda lecturas y actualiza el acumulado atómicamente. */
+export async function closeDay(
+  supabase: SupabaseClient,
+  date: string,
+  c: DayClosure,
+): Promise<void> {
+  const { error } = await supabase.rpc('close_day', {
+    p_date: date,
+    p_num_servicios: c.p_num_servicios,
+    p_carreras: c.p_carreras,
+    p_suplementos: c.p_suplementos,
+    p_dist_total: c.p_dist_total,
+    p_dist_ocupado: c.p_dist_ocupado,
+    p_dist_libre: c.p_dist_libre,
+    p_dist_off: c.p_dist_off,
+    p_tiempo_ocupado: c.p_tiempo_ocupado,
+    p_tiempo_on: c.p_tiempo_on,
+  });
+  if (error) throw new Error(`Error cerrando el día: ${error.message}`);
+}
+
+/** Formatea minutos como "Xh Ymin" para mostrar tiempos del taxímetro. */
+export function formatMinutes(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  if (h === 0) return `${m}min`;
+  return m === 0 ? `${h}h` : `${h}h ${m}min`;
+}
+
+export const km = new Intl.NumberFormat('es-ES', {
+  maximumFractionDigits: 1,
 });
