@@ -360,15 +360,15 @@ export async function closeDay(
 ): Promise<void> {
   const { error } = await supabase.rpc('close_day', {
     p_date: date,
-    p_num_servicios: c.p_num_servicios,
-    p_carreras: c.p_carreras,
-    p_suplementos: c.p_suplementos,
-    p_dist_total: c.p_dist_total,
-    p_dist_ocupado: c.p_dist_ocupado,
-    p_dist_libre: c.p_dist_libre,
-    p_dist_off: c.p_dist_off,
-    p_tiempo_ocupado: c.p_tiempo_ocupado,
-    p_tiempo_on: c.p_tiempo_on,
+    a_num_servicios: c.p_num_servicios,
+    a_carreras: c.p_carreras,
+    a_suplementos: c.p_suplementos,
+    a_dist_total: c.p_dist_total,
+    a_dist_ocupado: c.p_dist_ocupado,
+    a_dist_libre: c.p_dist_libre,
+    a_dist_off: c.p_dist_off,
+    a_tiempo_ocupado: c.p_tiempo_ocupado,
+    a_tiempo_on: c.p_tiempo_on,
   });
   if (error) throw new Error(`Error cerrando el día: ${error.message}`);
 }
