@@ -130,7 +130,7 @@ export default function ConfiguracionPage() {
     }
 
     // Preferencias del informe (1:1 con el usuario)
-    await supabase.from('report_preferences').upsert(
+    const { error: prefsError } = await supabase.from('report_preferences').upsert(
       {
         user_id: userId,
         show_cash: prefs.show_cash,
@@ -141,6 +141,21 @@ export default function ConfiguracionPage() {
       },
       { onConflict: 'user_id' },
     );
+
+    if (prefsError) {
+      setError(`No se pudieron guardar las preferencias del informe: ${prefsError.message}`);
+      setSaving(false);
+      return;
+    }
+
+    // Revalidación: leo de la BD lo que acabo de escribir. Si no coincide,
+    // algo (RLS, trigger) lo rechazó silenciosamente y no debo redirigir.
+    const persisted = await getReportPreferences(supabase);
+    if (persisted.show_cash !== prefs.show_cash) {
+      setError('Las preferencias no quedaron guardadas en la base de datos. Avísame.');
+      setSaving(false);
+      return;
+    }
 
     if (!hasExisting) {
       await supabase
