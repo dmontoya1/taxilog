@@ -50,7 +50,7 @@ export function buildReportPdf({
   // ---------- Cabecera ----------
   doc.setFillColor(...dark);
   doc.rect(0, 0, 210, 30, 'F');
-  doc.setTextColor(255, 180, 0);
+  doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(18);
   doc.text('Informe de liquidación', 14, 13);
@@ -104,7 +104,7 @@ export function buildReportPdf({
     head: [columns.map((c) => c.header)],
     body: visibleDays.map((day) => columns.map((c) => c.render(day))),
     styles: { fontSize: 8.5, cellPadding: 2 },
-    headStyles: { fillColor: dark, textColor: [255, 180, 0], fontStyle: 'bold' },
+    headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
     columnStyles,
     didParseCell: (data) => {
       if (data.section === 'body' && visibleDays[data.row.index]?.is_rest) {
@@ -244,7 +244,7 @@ export function buildDetailedReportPdf({
   // ---------- Cabecera ----------
   doc.setFillColor(...dark);
   doc.rect(0, 0, 210, 30, 'F');
-  doc.setTextColor(255, 180, 0);
+  doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(18);
   doc.text('Detalle de movimientos', 14, 13);
@@ -295,7 +295,7 @@ export function buildDetailedReportPdf({
     head: [['Hora', 'Tipo', 'Detalle', 'Importe']],
     body,
     styles: { fontSize: 8.5, cellPadding: 2 },
-    headStyles: { fillColor: dark, textColor: [255, 180, 0], fontStyle: 'bold' },
+    headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
     columnStyles: { 0: { cellWidth: 18 }, 1: { cellWidth: 24 }, 3: { halign: 'right', cellWidth: 28 } },
     didParseCell: (data) => {
       if (data.section !== 'body') return;

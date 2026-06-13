@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Bricolage_Grotesque, Figtree, IBM_Plex_Mono } from 'next/font/google';
+import { Analytics } from '@vercel/analytics/next';
 import './globals.css';
 
 const display = Bricolage_Grotesque({
@@ -34,7 +35,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#0b0c0e',
+  themeColor: '#0c0d10',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1, // evita zoom accidental al tocar inputs en iOS
@@ -47,6 +48,7 @@ export default function RootLayout({
     <html lang="es">
       <body className={`${display.variable} ${body.variable} ${meter.variable}`}>
         {children}
+        <Analytics />
       </body>
     </html>
   );
