@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { isRestDay, parseLocalDate, toIsoDate } from '@/lib/domain/rest-days';
+import { currentWorkday, isRestDay, parseLocalDate } from '@/lib/domain/rest-days';
+import { getEmisoras, type Emisora } from '@/lib/domain/emisoras';
 import {
   euro,
   getActiveAgreement,
@@ -28,6 +30,8 @@ interface IncomeEntry {
   amount: number;
   notes: string | null;
   created_at: string;
+  emisora_id: string | null;
+  emisora: { name: string } | null;
 }
 
 interface DayExpense {
@@ -64,13 +68,17 @@ const METHOD_TABS: Array<[IncomeMethod, string]> = [
 
 export default function RegistroPage() {
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
 
-  const [date, setDate] = useState(() => toIsoDate(new Date()));
+  const [date, setDate] = useState(() => currentWorkday());
   const [method, setMethod] = useState<IncomeMethod>('cash');
   const [amount, setAmount] = useState('');
+  const [emisoraId, setEmisoraId] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [entries, setEntries] = useState<IncomeEntry[]>([]);
   const [dayExpenses, setDayExpenses] = useState<DayExpense[]>([]);
+  const [emisoras, setEmisoras] = useState<Emisora[]>([]);
   const [isRest, setIsRest] = useState(false);
   const [isFeeExempt, setIsFeeExempt] = useState(false);
   const [dayClosed, setDayClosed] = useState(false);
@@ -81,12 +89,15 @@ export default function RegistroPage() {
   const [showCloseSheet, setShowCloseSheet] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const activeEmisoras = emisoras.filter((e) => e.is_active);
+
   const localDay = parseLocalDate(date);
   const suggestedRest =
     agreement != null &&
     isRestDay(localDay, {
       weekdayRest: agreement.weekday_rest,
       weekendWorkParity: agreement.weekend_work_parity,
+      vehicleType: agreement.vehicle_type,
     });
 
   const refreshSettlement = useCallback(async () => {
@@ -98,11 +109,11 @@ export default function RegistroPage() {
   const loadDay = useCallback(async () => {
     setError(null);
     try {
-      const [ag, entriesRes, expensesRes, flagsRes] = await Promise.all([
+      const [ag, entriesRes, expensesRes, flagsRes, emisorasList] = await Promise.all([
         getActiveAgreement(supabase, date),
         supabase
           .from('income_entries')
-          .select('id, method, amount, notes, created_at')
+          .select('id, method, amount, notes, created_at, emisora_id, emisora:emisoras(name)')
           .eq('entry_date', date)
           .order('created_at', { ascending: false }),
         supabase
@@ -115,14 +126,16 @@ export default function RegistroPage() {
           .select('is_rest_day, is_fee_exempt, day_closed')
           .eq('work_date', date)
           .maybeSingle(),
+        getEmisoras(supabase),
       ]);
 
       setAgreement(ag);
-      setEntries((entriesRes.data as IncomeEntry[]) ?? []);
+      setEntries((entriesRes.data as unknown as IncomeEntry[]) ?? []);
       setDayExpenses((expensesRes.data as unknown as DayExpense[]) ?? []);
       setIsRest(flagsRes.data?.is_rest_day ?? false);
       setIsFeeExempt(flagsRes.data?.is_fee_exempt ?? false);
       setDayClosed(flagsRes.data?.day_closed ?? false);
+      setEmisoras(emisorasList);
 
       await refreshSettlement();
     } catch (e) {
@@ -134,36 +147,80 @@ export default function RegistroPage() {
     void loadDay();
   }, [loadDay]);
 
-  async function handleAddEntry() {
+  function resetForm() {
+    setAmount('');
+    setEmisoraId('');
+    setMethod('cash');
+    setEditingId(null);
+  }
+
+  function startEditEntry(entry: IncomeEntry) {
+    setEditingId(entry.id);
+    setMethod(entry.method);
+    setAmount(String(entry.amount));
+    setEmisoraId(entry.emisora_id ?? '');
+    setError(null);
+  }
+
+  async function handleSaveEntry() {
     const value = Number(amount);
     if (!value || value <= 0) {
       setError('Indica el monto de la carrera o cobro.');
       return;
     }
+    if (method === 'emisora') {
+      if (activeEmisoras.length === 0) {
+        setError('No tienes emisoras configuradas. Añádelas en Configuración.');
+        return;
+      }
+      if (!emisoraId) {
+        setError('Elige la emisora de la carrera.');
+        return;
+      }
+    }
     setSaving(true);
     setError(null);
 
     const { data: userData } = await supabase.auth.getUser();
-    const { error: insertError } = await supabase.from('income_entries').insert({
-      user_id: userData.user!.id,
-      entry_date: date,
-      method,
-      amount: value,
-    });
+    const emisora_id = method === 'emisora' ? emisoraId : null;
 
-    if (insertError) {
+    const { error: saveError } = editingId
+      ? await supabase
+          .from('income_entries')
+          .update({ method, amount: value, emisora_id })
+          .eq('id', editingId)
+      : await supabase.from('income_entries').insert({
+          user_id: userData.user!.id,
+          entry_date: date,
+          method,
+          amount: value,
+          emisora_id,
+        });
+
+    if (saveError) {
       setError('No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.');
       setSaving(false);
       return;
     }
 
-    setAmount('');
+    resetForm();
     setSaving(false);
     await loadDay();
   }
 
-  async function handleDeleteEntry(kind: MovementKind, id: string) {
+  function handleEditMovement(kind: MovementKind, id: string) {
+    if (kind === 'expense') {
+      // Los gastos se editan en su pantalla, con su categoría y % del jefe.
+      router.push(`/gastos?date=${date}`);
+      return;
+    }
+    const entry = entries.find((e) => e.id === id);
+    if (entry) startEditEntry(entry);
+  }
+
+  async function handleDeleteMovement(kind: MovementKind, id: string) {
     const table = kind === 'expense' ? 'expenses' : 'income_entries';
+    if (editingId === id) resetForm();
     await supabase.from(table).delete().eq('id', id);
     await loadDay();
   }
@@ -211,7 +268,10 @@ export default function RegistroPage() {
       kind: e.method,
       id: e.id,
       amount: Number(e.amount),
-      label: incomeLabel[e.method],
+      label:
+        e.method === 'emisora' && e.emisora?.name
+          ? `${incomeLabel[e.method]} · ${e.emisora.name}`
+          : incomeLabel[e.method],
       createdAt: e.created_at,
     })),
     ...dayExpenses.map<Movement>((e) => ({
@@ -288,11 +348,18 @@ export default function RegistroPage() {
           <input
             type="date"
             value={date}
-            max={toIsoDate(new Date())}
-            onChange={(e) => setDate(e.target.value)}
+            max={currentWorkday()}
+            onChange={(e) => {
+              resetForm();
+              setDate(e.target.value);
+            }}
             className="amount-input px-3 py-2 text-sm"
           />
         </div>
+
+        <p className="mt-2 text-xs text-muted">
+          La jornada va de 6:00 a 6:00. Las carreras de 00:00 a 06:00 cuentan al día anterior.
+        </p>
 
         <label className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-bg px-4 py-3">
           <span className="text-sm">Este día descansé</span>
@@ -328,15 +395,26 @@ export default function RegistroPage() {
         )}
       </section>
 
-      {/* ---------- Añadir transacción ---------- */}
+      {/* ---------- Añadir / editar transacción ---------- */}
       {!isRest && (
         <section className="card rise-in-3 flex flex-col gap-4 p-5">
+          {editingId && (
+            <div className="flex items-center justify-between text-xs text-amber">
+              <span>Editando movimiento</span>
+              <button type="button" onClick={resetForm} className="text-muted underline">
+                Cancelar
+              </button>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-2">
             {METHOD_TABS.map(([value, label]) => (
               <button
                 key={value}
                 type="button"
-                onClick={() => setMethod(value)}
+                onClick={() => {
+                  setMethod(value);
+                  if (value !== 'emisora') setEmisoraId('');
+                }}
                 className={`rounded-xl border px-2 py-3 text-xs font-semibold transition-colors ${
                   method === value
                     ? 'border-amber bg-amber-soft text-amber'
@@ -348,6 +426,30 @@ export default function RegistroPage() {
             ))}
           </div>
 
+          {method === 'emisora' &&
+            (activeEmisoras.length > 0 ? (
+              <select
+                value={emisoraId}
+                onChange={(e) => setEmisoraId(e.target.value)}
+                className="amount-input px-3 py-3 text-base"
+              >
+                <option value="">Elige la emisora…</option>
+                {activeEmisoras.map((em) => (
+                  <option key={em.id} value={em.id}>
+                    {em.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-xs text-muted">
+                No tienes emisoras configuradas.{' '}
+                <Link href="/configuracion" className="text-amber underline">
+                  Añádelas en Configuración
+                </Link>
+                .
+              </p>
+            ))}
+
           <div className="flex gap-2">
             <input
               type="number"
@@ -357,16 +459,16 @@ export default function RegistroPage() {
               placeholder="0,00"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddEntry()}
+              onKeyDown={(e) => e.key === 'Enter' && handleSaveEntry()}
               className="amount-input min-w-0 flex-1 px-4 py-4 text-2xl"
             />
             <button
-              onClick={handleAddEntry}
+              onClick={handleSaveEntry}
               disabled={saving}
               className="btn-amber shrink-0 px-6 text-2xl"
-              aria-label="Añadir transacción"
+              aria-label={editingId ? 'Guardar cambios' : 'Añadir transacción'}
             >
-              +
+              {editingId ? '✓' : '+'}
             </button>
           </div>
 
@@ -407,7 +509,9 @@ export default function RegistroPage() {
             return (
               <div
                 key={`${m.kind}-${m.id}`}
-                className="card flex items-center justify-between px-4 py-3"
+                className={`card flex items-center justify-between px-4 py-3 ${
+                  editingId === m.id ? 'border-amber' : ''
+                }`}
               >
                 <div className="flex items-center gap-3">
                   <span className="text-xl">{style.icon}</span>
@@ -427,7 +531,14 @@ export default function RegistroPage() {
                     {euro.format(m.amount)}
                   </span>
                   <button
-                    onClick={() => handleDeleteEntry(m.kind, m.id)}
+                    onClick={() => handleEditMovement(m.kind, m.id)}
+                    aria-label="Editar movimiento"
+                    className="text-muted transition-colors hover:text-amber"
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    onClick={() => handleDeleteMovement(m.kind, m.id)}
                     aria-label="Eliminar movimiento"
                     className="text-muted transition-colors hover:text-bad"
                   >

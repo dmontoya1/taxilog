@@ -12,11 +12,19 @@
 
 export type WeekendParity = 'even' | 'odd';
 
+/**
+ * Tipo de vehículo. Solo 'gasoline' tiene descanso obligatorio; 'electric' y
+ * 'eurotaxi' descansan libremente (el conductor decide qué días).
+ */
+export type VehicleType = 'gasoline' | 'electric' | 'eurotaxi';
+
 export interface RestConfig {
   /** Día fijo de descanso, ISO: 1=lunes … 5=viernes */
   weekdayRest: 1 | 2 | 3 | 4 | 5;
   /** Paridad del día del mes que SÍ se trabaja en fin de semana */
   weekendWorkParity: WeekendParity;
+  /** Tipo de vehículo: solo gasolina tiene descanso obligatorio. */
+  vehicleType: VehicleType;
 }
 
 /** Día de la semana ISO (1=lunes … 7=domingo) de una fecha local. */
@@ -36,6 +44,8 @@ export function isWeekend(date: Date): boolean {
  * que vive en el registro diario, no en la regla.
  */
 export function isRestDay(date: Date, config: RestConfig): boolean {
+  // Eléctrico y Eurotaxi no tienen descanso obligatorio: el conductor decide.
+  if (config.vehicleType !== 'gasoline') return false;
   if (isWeekend(date)) {
     const dayParity: WeekendParity = date.getDate() % 2 === 0 ? 'even' : 'odd';
     return dayParity !== config.weekendWorkParity;
@@ -60,6 +70,21 @@ export function toIsoDate(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+/**
+ * La jornada del taxi en Madrid empieza/termina a las 6:00. Las carreras hechas
+ * entre las 00:00 y las 06:00 pertenecen a la jornada del día ANTERIOR.
+ */
+export const WORKDAY_START_HOUR = 6;
+
+/** Jornada vigente en formato 'YYYY-MM-DD': antes de las 6:00 cuenta como ayer. */
+export function currentWorkday(now: Date = new Date()): string {
+  const d = new Date(now);
+  if (d.getHours() < WORKDAY_START_HOUR) {
+    d.setDate(d.getDate() - 1);
+  }
+  return toIsoDate(d);
 }
 
 export interface CalendarDay {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  currentWorkday,
   isRestDay,
   localDate,
   monthSchedule,
@@ -8,9 +9,9 @@ import {
 } from '../rest-days';
 
 // Config del papá de Dani: descansa lunes, trabaja el día PAR del finde.
-const papa: RestConfig = { weekdayRest: 1, weekendWorkParity: 'even' };
+const papa: RestConfig = { weekdayRest: 1, weekendWorkParity: 'even', vehicleType: 'gasoline' };
 // Conductor opuesto: descansa miércoles, trabaja el día IMPAR del finde.
-const otro: RestConfig = { weekdayRest: 3, weekendWorkParity: 'odd' };
+const otro: RestConfig = { weekdayRest: 3, weekendWorkParity: 'odd', vehicleType: 'gasoline' };
 
 describe('día fijo de descanso entre semana', () => {
   it('descansa su lunes', () => {
@@ -56,6 +57,38 @@ describe('fin de semana por paridad del día del mes', () => {
     // Mayo 2026: sábado 30, domingo 31
     expect(isRestDay(localDate(2026, 5, 30), papa)).toBe(false); // 30 par → trabaja
     expect(isRestDay(localDate(2026, 5, 31), papa)).toBe(true); // 31 impar → descansa
+  });
+});
+
+describe('tipo de vehículo: solo gasolina descansa obligatorio', () => {
+  it('eléctrico nunca tiene descanso obligatorio', () => {
+    const electrico: RestConfig = { weekdayRest: 1, weekendWorkParity: 'even', vehicleType: 'electric' };
+    expect(isRestDay(localDate(2025, 6, 9), electrico)).toBe(false); // su "lunes de descanso"
+    expect(isRestDay(localDate(2025, 11, 15), electrico)).toBe(false); // finde
+  });
+
+  it('eurotaxi nunca tiene descanso obligatorio', () => {
+    const euro: RestConfig = { weekdayRest: 1, weekendWorkParity: 'even', vehicleType: 'eurotaxi' };
+    expect(isRestDay(localDate(2025, 6, 9), euro)).toBe(false);
+    expect(isRestDay(localDate(2026, 1, 31), euro)).toBe(false);
+  });
+});
+
+describe('corte de jornada a las 6:00 (currentWorkday)', () => {
+  it('a las 05:59 la jornada es el día anterior', () => {
+    expect(currentWorkday(new Date(2026, 5, 14, 5, 59))).toBe('2026-06-13');
+  });
+
+  it('a las 06:00 la jornada es el mismo día', () => {
+    expect(currentWorkday(new Date(2026, 5, 14, 6, 0))).toBe('2026-06-14');
+  });
+
+  it('a las 23:59 la jornada es el mismo día', () => {
+    expect(currentWorkday(new Date(2026, 5, 14, 23, 59))).toBe('2026-06-14');
+  });
+
+  it('a las 03:00 del día 1 retrocede al último día del mes anterior', () => {
+    expect(currentWorkday(new Date(2026, 5, 1, 3, 0))).toBe('2026-05-31');
   });
 });
 
