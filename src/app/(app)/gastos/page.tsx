@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { toIsoDate } from '@/lib/domain/rest-days';
+import { currentWorkday } from '@/lib/domain/rest-days';
 import { euro } from '@/lib/domain/settlement';
 
 interface Category {
@@ -17,20 +18,23 @@ interface Expense {
   amount: number;
   boss_share: number;
   notes: string | null;
+  category_id: string | null;
   category: { name: string } | null;
 }
 
-export default function GastosPage() {
+function GastosInner() {
   const supabase = useMemo(() => createClient(), []);
+  const searchParams = useSearchParams();
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [recent, setRecent] = useState<Expense[]>([]);
 
-  const [date, setDate] = useState(() => toIsoDate(new Date()));
+  const [date, setDate] = useState(() => searchParams.get('date') ?? currentWorkday());
   const [categoryId, setCategoryId] = useState('');
   const [amount, setAmount] = useState('');
   const [bossShare, setBossShare] = useState('0');
   const [notes, setNotes] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +44,7 @@ export default function GastosPage() {
       supabase.from('expense_categories').select('*').order('name'),
       supabase
         .from('expenses')
-        .select('id, expense_date, amount, boss_share, notes, category:expense_categories(name)')
+        .select('id, expense_date, amount, boss_share, notes, category_id, category:expense_categories(name)')
         .order('expense_date', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(10),
@@ -64,6 +68,22 @@ export default function GastosPage() {
     if (cat) setBossShare(String(cat.default_boss_share));
   }
 
+  function resetForm() {
+    setAmount('');
+    setNotes('');
+    setEditingId(null);
+  }
+
+  function startEdit(e: Expense) {
+    setEditingId(e.id);
+    setDate(e.expense_date);
+    setCategoryId(e.category_id ?? '');
+    setAmount(String(e.amount));
+    setBossShare(String(e.boss_share));
+    setNotes(e.notes ?? '');
+    setError(null);
+  }
+
   async function handleSave() {
     if (!amount || Number(amount) <= 0) {
       setError('Indica el monto del gasto.');
@@ -73,28 +93,31 @@ export default function GastosPage() {
     setError(null);
 
     const { data: userData } = await supabase.auth.getUser();
-    const { error: insertError } = await supabase.from('expenses').insert({
-      user_id: userData.user!.id,
+    const payload = {
       expense_date: date,
       category_id: categoryId || null,
       amount: Number(amount),
       boss_share: Number(bossShare) || 0,
       notes: notes.trim() || null,
-    });
+    };
 
-    if (insertError) {
+    const { error: saveError } = editingId
+      ? await supabase.from('expenses').update(payload).eq('id', editingId)
+      : await supabase.from('expenses').insert({ user_id: userData.user!.id, ...payload });
+
+    if (saveError) {
       setError('No se pudo guardar el gasto. Inténtalo de nuevo.');
       setSaving(false);
       return;
     }
 
-    setAmount('');
-    setNotes('');
+    resetForm();
     setSaving(false);
     await load();
   }
 
   async function handleDelete(id: string) {
+    if (editingId === id) resetForm();
     await supabase.from('expenses').delete().eq('id', id);
     await load();
   }
@@ -106,12 +129,21 @@ export default function GastosPage() {
       </h1>
 
       <section className="card rise-in-2 flex flex-col gap-4 p-5">
+        {editingId && (
+          <div className="flex items-center justify-between text-xs text-amber">
+            <span>Editando gasto</span>
+            <button type="button" onClick={resetForm} className="text-muted underline">
+              Cancelar
+            </button>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <label className="flex flex-col gap-1.5">
             <span className="text-sm text-muted">Fecha</span>
             <input
               type="date"
               value={date}
+              max={currentWorkday()}
               onChange={(e) => setDate(e.target.value)}
               className="amount-input px-3 py-3 text-sm"
             />
@@ -175,7 +207,7 @@ export default function GastosPage() {
         {error && <p className="text-sm text-bad">{error}</p>}
 
         <button onClick={handleSave} disabled={saving} className="btn-amber py-3.5 text-base">
-          {saving ? 'Guardando…' : 'Añadir gasto'}
+          {saving ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Añadir gasto'}
         </button>
       </section>
 
@@ -184,7 +216,12 @@ export default function GastosPage() {
         <section className="rise-in-3 flex flex-col gap-2">
           <h2 className="text-sm uppercase tracking-widest text-muted">Últimos</h2>
           {recent.map((e) => (
-            <div key={e.id} className="card flex items-center justify-between px-4 py-3">
+            <div
+              key={e.id}
+              className={`card flex items-center justify-between px-4 py-3 ${
+                editingId === e.id ? 'border-amber' : ''
+              }`}
+            >
               <div>
                 <p className="text-sm font-semibold">
                   {e.category?.name ?? 'Sin categoría'}
@@ -200,6 +237,13 @@ export default function GastosPage() {
               <div className="flex items-center gap-3">
                 <span className="taximeter text-base">{euro.format(e.amount)}</span>
                 <button
+                  onClick={() => startEdit(e)}
+                  aria-label="Editar gasto"
+                  className="text-muted transition-colors hover:text-amber"
+                >
+                  ✏️
+                </button>
+                <button
                   onClick={() => handleDelete(e.id)}
                   aria-label="Eliminar gasto"
                   className="text-muted transition-colors hover:text-bad"
@@ -212,5 +256,13 @@ export default function GastosPage() {
         </section>
       )}
     </div>
+  );
+}
+
+export default function GastosPage() {
+  return (
+    <Suspense fallback={<p className="pt-10 text-center text-muted">Cargando…</p>}>
+      <GastosInner />
+    </Suspense>
   );
 }

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { VehicleType } from './rest-days';
 
 export type FeeType = 'fixed' | 'percentage';
 
@@ -37,6 +38,7 @@ export interface AgreementConfig {
   weekday_rest: 1 | 2 | 3 | 4 | 5;
   weekend_work_parity: 'even' | 'odd';
   card_goes_to_boss: boolean;
+  vehicle_type: VehicleType;
   valid_from: string;
   valid_to: string | null;
 }
@@ -156,7 +158,7 @@ export async function getRangeTransactions(
   const [inc, exp] = await Promise.all([
     supabase
       .from('income_entries')
-      .select('id, entry_date, method, amount, notes, created_at')
+      .select('id, entry_date, method, amount, notes, created_at, emisora:emisoras(name)')
       .gte('entry_date', from)
       .lte('entry_date', to),
     supabase
@@ -176,6 +178,7 @@ export async function getRangeTransactions(
     amount: number;
     notes: string | null;
     created_at: string;
+    emisora: { name: string } | null;
   };
   type ExpRow = {
     id: string;
@@ -193,13 +196,16 @@ export async function getRangeTransactions(
     emisora: 'Emisora',
   };
 
-  const incomes = (inc.data as IncRow[]).map<RangeTransaction>((e) => ({
+  const incomes = (inc.data as unknown as IncRow[]).map<RangeTransaction>((e) => ({
     kind: e.method,
     id: e.id,
     date: e.entry_date,
     createdAt: e.created_at,
     amount: Number(e.amount),
-    label: incomeLabel[e.method],
+    label:
+      e.method === 'emisora' && e.emisora?.name
+        ? `${incomeLabel[e.method]} · ${e.emisora.name}`
+        : incomeLabel[e.method],
     notes: e.notes,
   }));
 

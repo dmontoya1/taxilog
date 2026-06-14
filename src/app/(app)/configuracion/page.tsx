@@ -3,7 +3,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { toIsoDate } from '@/lib/domain/rest-days';
+import { toIsoDate, type VehicleType } from '@/lib/domain/rest-days';
+import {
+  addEmisora,
+  deleteEmisora,
+  getEmisoras,
+  setEmisoraActive,
+  MADRID_EMISORAS,
+  type Emisora,
+} from '@/lib/domain/emisoras';
 import {
   DEFAULT_REPORT_PREFS,
   euro,
@@ -69,7 +77,13 @@ export default function ConfiguracionPage() {
   const [weekdayRest, setWeekdayRest] = useState(1);
   const [parity, setParity] = useState<'even' | 'odd'>('even');
   const [cardGoesToBoss, setCardGoesToBoss] = useState(true);
+  const [vehicleType, setVehicleType] = useState<VehicleType>('gasoline');
   const [validFrom, setValidFrom] = useState(() => toIsoDate(new Date()));
+
+  // ---------- Emisoras (gestión inmediata, fuera del versionado del acuerdo) ----------
+  const [emisoras, setEmisoras] = useState<Emisora[]>([]);
+  const [newEmisora, setNewEmisora] = useState('');
+  const [emisoraError, setEmisoraError] = useState<string | null>(null);
 
   // ---------- Preferencias de informe ----------
   const [prefs, setPrefs] = useState<ReportPreferences>(DEFAULT_REPORT_PREFS);
@@ -101,10 +115,11 @@ export default function ConfiguracionPage() {
 
   useEffect(() => {
     (async () => {
-      const [current, savedPrefs, totals] = await Promise.all([
+      const [current, savedPrefs, totals, emisorasList] = await Promise.all([
         getActiveAgreement(supabase, toIsoDate(new Date())),
         getReportPreferences(supabase),
         getOdometerTotals(supabase),
+        getEmisoras(supabase),
       ]);
       if (current) {
         setHasExisting(true);
@@ -113,7 +128,9 @@ export default function ConfiguracionPage() {
         setWeekdayRest(current.weekday_rest);
         setParity(current.weekend_work_parity);
         setCardGoesToBoss(current.card_goes_to_boss);
+        setVehicleType(current.vehicle_type);
       }
+      setEmisoras(emisorasList);
       setPrefs(savedPrefs);
       if (totals) {
         setOdo(
@@ -157,6 +174,7 @@ export default function ConfiguracionPage() {
       weekday_rest: weekdayRest,
       weekend_work_parity: parity,
       card_goes_to_boss: cardGoesToBoss,
+      vehicle_type: vehicleType,
       valid_from: validFrom,
     });
 
@@ -222,6 +240,46 @@ export default function ConfiguracionPage() {
     }
 
     router.replace('/registro');
+  }
+
+  async function reloadEmisoras() {
+    setEmisoras(await getEmisoras(supabase));
+  }
+
+  async function handleAddEmisora(name: string) {
+    const clean = name.trim();
+    if (!clean) return;
+    if (emisoras.some((e) => e.name.toLowerCase() === clean.toLowerCase())) {
+      setEmisoraError('Esa emisora ya está en tu lista.');
+      return;
+    }
+    setEmisoraError(null);
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      await addEmisora(supabase, userData.user!.id, clean);
+      setNewEmisora('');
+      await reloadEmisoras();
+    } catch (e) {
+      setEmisoraError(e instanceof Error ? e.message : 'No se pudo añadir la emisora.');
+    }
+  }
+
+  async function handleToggleEmisora(em: Emisora) {
+    try {
+      await setEmisoraActive(supabase, em.id, !em.is_active);
+      await reloadEmisoras();
+    } catch (e) {
+      setEmisoraError(e instanceof Error ? e.message : 'No se pudo actualizar la emisora.');
+    }
+  }
+
+  async function handleDeleteEmisora(id: string) {
+    try {
+      await deleteEmisora(supabase, id);
+      await reloadEmisoras();
+    } catch (e) {
+      setEmisoraError(e instanceof Error ? e.message : 'No se pudo borrar la emisora.');
+    }
   }
 
   return (
@@ -294,42 +352,28 @@ export default function ConfiguracionPage() {
         />
       </section>
 
-      {/* ---------- Descansos ---------- */}
+      {/* ---------- Vehículo y descansos ---------- */}
       <h2 className="rise-in-2 mt-2 text-xs uppercase tracking-widest text-muted">
-        Descansos
+        Vehículo y descansos
       </h2>
 
       <section className="card rise-in-2 flex flex-col gap-4 p-5">
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm text-muted">Día fijo de descanso (lun–vie)</span>
-          <select
-            value={weekdayRest}
-            onChange={(e) => setWeekdayRest(Number(e.target.value))}
-            className="amount-input px-4 py-3 text-base"
-          >
-            {WEEKDAYS.map((d) => (
-              <option key={d.value} value={d.value}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
         <div className="flex flex-col gap-1.5">
-          <span className="text-sm text-muted">Fin de semana: trabajas el día…</span>
-          <div className="grid grid-cols-2 gap-2">
+          <span className="text-sm text-muted">Tipo de vehículo</span>
+          <div className="grid grid-cols-3 gap-2">
             {(
               [
-                ['even', 'Par (2, 4, 16…)'],
-                ['odd', 'Impar (1, 3, 15…)'],
+                ['gasoline', 'Gasolina'],
+                ['electric', 'Eléctrico'],
+                ['eurotaxi', 'Eurotaxi'],
               ] as const
             ).map(([value, label]) => (
               <button
                 key={value}
                 type="button"
-                onClick={() => setParity(value)}
-                className={`rounded-xl border px-4 py-3 text-sm font-semibold transition-colors ${
-                  parity === value
+                onClick={() => setVehicleType(value)}
+                className={`rounded-xl border px-2 py-3 text-sm font-semibold transition-colors ${
+                  vehicleType === value
                     ? 'border-amber bg-amber-soft text-amber'
                     : 'border-line text-muted'
                 }`}
@@ -340,6 +384,55 @@ export default function ConfiguracionPage() {
           </div>
         </div>
 
+        {vehicleType === 'gasoline' ? (
+          <>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-sm text-muted">Día fijo de descanso (lun–vie)</span>
+              <select
+                value={weekdayRest}
+                onChange={(e) => setWeekdayRest(Number(e.target.value))}
+                className="amount-input px-4 py-3 text-base"
+              >
+                {WEEKDAYS.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm text-muted">Fin de semana: trabajas el día…</span>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ['even', 'Par (2, 4, 16…)'],
+                    ['odd', 'Impar (1, 3, 15…)'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setParity(value)}
+                    className={`rounded-xl border px-4 py-3 text-sm font-semibold transition-colors ${
+                      parity === value
+                        ? 'border-amber bg-amber-soft text-amber'
+                        : 'border-line text-muted'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : (
+          <p className="rounded-xl bg-bg px-4 py-3 text-sm text-muted">
+            Sin descanso obligatorio: tú eliges qué días descansas. Cada día puedes marcar
+            «Este día descansé» en el registro.
+          </p>
+        )}
+
         <label className="flex flex-col gap-1.5">
           <span className="text-sm text-muted">Este acuerdo aplica desde</span>
           <input
@@ -349,6 +442,91 @@ export default function ConfiguracionPage() {
             className="amount-input px-4 py-3 text-base"
           />
         </label>
+      </section>
+
+      {/* ---------- Emisoras ---------- */}
+      <h2 className="mt-2 text-xs uppercase tracking-widest text-muted">Emisoras</h2>
+
+      <section className="card flex flex-col gap-3 p-5">
+        <p className="text-xs text-muted">
+          Las emisoras con las que trabajas. Al registrar un ingreso por emisora, eliges una de
+          estas. Es informativo: la emisora va al jefe igual que el datáfono.
+        </p>
+
+        {emisoras.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {emisoras.map((em) => (
+              <div
+                key={em.id}
+                className="flex items-center justify-between gap-3 rounded-xl bg-bg px-4 py-3"
+              >
+                <span className={`text-sm ${em.is_active ? '' : 'text-muted line-through'}`}>
+                  📻 {em.name}
+                </span>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleEmisora(em)}
+                    className="text-xs font-semibold text-muted underline transition-colors hover:text-amber"
+                  >
+                    {em.is_active ? 'Desactivar' : 'Activar'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteEmisora(em.id)}
+                    aria-label="Borrar emisora"
+                    className="text-muted transition-colors hover:text-bad"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {MADRID_EMISORAS.filter(
+          (name) => !emisoras.some((e) => e.name.toLowerCase() === name.toLowerCase()),
+        ).length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs text-muted">Añadir rápido (Madrid)</span>
+            <div className="flex flex-wrap gap-2">
+              {MADRID_EMISORAS.filter(
+                (name) => !emisoras.some((e) => e.name.toLowerCase() === name.toLowerCase()),
+              ).map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => handleAddEmisora(name)}
+                  className="rounded-xl border border-line px-3 py-2 text-xs font-semibold text-muted transition-colors hover:border-amber hover:text-amber"
+                >
+                  + {name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newEmisora}
+            onChange={(e) => setNewEmisora(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddEmisora(newEmisora)}
+            placeholder="Otra emisora…"
+            className="amount-input min-w-0 flex-1 px-4 py-3 text-base"
+          />
+          <button
+            type="button"
+            onClick={() => handleAddEmisora(newEmisora)}
+            className="btn-amber shrink-0 px-5 text-xl"
+            aria-label="Añadir emisora"
+          >
+            +
+          </button>
+        </div>
+
+        {emisoraError && <p className="text-sm text-bad">{emisoraError}</p>}
       </section>
 
       {/* ---------- Preferencias del informe del jefe ---------- */}
