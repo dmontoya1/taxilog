@@ -89,7 +89,7 @@ export default function InformesPage() {
   }
 
   async function handleExportBoss() {
-    if (!days || !summary) return;
+    if (!days || !summary || !detail) return;
     setExporting('boss');
     try {
       const [{ buildReportPdf, sharePdf }, driverName, prefs, agreement] = await Promise.all([
@@ -98,6 +98,9 @@ export default function InformesPage() {
         getReportPreferences(supabase),
         getActiveAgreement(supabase, to),
       ]);
+      const amexTransactions = detail
+        .flatMap((d) => d.transactions)
+        .filter((t) => t.kind === 'card' && t.is_amex);
       const doc = buildReportPdf({
         driverName,
         from,
@@ -106,6 +109,7 @@ export default function InformesPage() {
         summary,
         prefs,
         cardGoesToBoss: agreement?.card_goes_to_boss ?? true,
+        amexTransactions,
       });
       await sharePdf(doc, `liquidacion_${from}_${to}.pdf`);
     } catch {
@@ -220,8 +224,16 @@ export default function InformesPage() {
             <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
               <span className="text-muted">Efectivo</span>
               <span className="taximeter text-right">{euro.format(summary.total_cash)}</span>
-              <span className="text-muted">Datáfono (lo tiene el jefe)</span>
+              <span className="text-muted">Datáfono (jefe)</span>
               <span className="taximeter text-right">{euro.format(summary.total_card)}</span>
+              {(summary.total_emisora ?? 0) > 0 && (
+                <>
+                  <span className="text-muted">Emisoras (jefe)</span>
+                  <span className="taximeter text-right">
+                    {euro.format(summary.total_emisora ?? 0)}
+                  </span>
+                </>
+              )}
               <span className="text-muted">Cuotas del período</span>
               <span className="taximeter text-right">{euro.format(summary.boss_due)}</span>
               <span className="text-muted">Gastos a cargo del jefe</span>
@@ -301,7 +313,7 @@ export default function InformesPage() {
                     </div>
 
                     {!day.is_rest && (
-                      <div className="mt-2 grid grid-cols-4 gap-1 text-center text-xs">
+                      <div className={`mt-2 grid gap-1 text-center text-xs ${day.emisora > 0 ? 'grid-cols-5' : 'grid-cols-4'}`}>
                         <div>
                           <p className="text-muted">💶</p>
                           <p className="taximeter mt-0.5">{euro.format(day.cash)}</p>
@@ -310,6 +322,12 @@ export default function InformesPage() {
                           <p className="text-muted">💳</p>
                           <p className="taximeter mt-0.5">{euro.format(day.card)}</p>
                         </div>
+                        {day.emisora > 0 && (
+                          <div>
+                            <p className="text-muted">📻</p>
+                            <p className="taximeter mt-0.5">{euro.format(day.emisora)}</p>
+                          </div>
+                        )}
                         <div>
                           <p className="text-muted">⛽</p>
                           <p className="taximeter mt-0.5">
@@ -350,6 +368,9 @@ export default function InformesPage() {
                         {day.totalCard > 0 && (
                           <span className="text-amber">💳 {euro.format(day.totalCard)} </span>
                         )}
+                        {day.totalEmisora > 0 && (
+                          <span className="text-amber">📻 {euro.format(day.totalEmisora)} </span>
+                        )}
                         {day.totalExpenses > 0 && (
                           <span className="text-bad">⛽ {euro.format(day.totalExpenses)}</span>
                         )}
@@ -366,11 +387,17 @@ export default function InformesPage() {
                           <div className="flex items-center gap-3">
                             <span className="text-lg">{ui.icon}</span>
                             <div>
-                              <p className="text-sm font-semibold">{t.label}</p>
+                              <p className="text-sm font-semibold">
+                                {t.label}
+                                {t.is_amex && (
+                                  <span className="ml-1.5 rounded bg-amber-soft px-1.5 py-0.5 text-xs text-amber">
+                                    AMEX
+                                  </span>
+                                )}
+                              </p>
                               <p className="text-xs text-muted">
                                 {TIME_LABEL.format(new Date(t.createdAt))}
-                                {t.kind !== 'expense' && t.notes ? ` · ${t.notes}` : ''}
-                                {t.kind === 'expense' && t.notes ? ` · ${t.notes}` : ''}
+                                {t.notes ? ` · ${t.notes}` : ''}
                               </p>
                             </div>
                           </div>

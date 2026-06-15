@@ -46,6 +46,7 @@ export interface AgreementConfig {
 export interface SettlementSummary {
   total_cash: number;
   total_card: number;
+  total_emisora?: number;
   total_gross: number;
   boss_due: number;
   boss_received: number;
@@ -57,8 +58,9 @@ export interface SettlementSummary {
 export interface SettlementDay {
   d: string; // YYYY-MM-DD
   cash: number;
-  card: number;         // datáfono total del día
-  card_to_boss: number; // parte del datáfono que el jefe efectivamente cobró
+  card: number;         // datáfono SOLO
+  emisora: number;      // emisora SOLO
+  card_to_boss: number; // (datáfono si card_goes_to_boss) + emisora
   gross: number;
   expense_total: number;
   boss_expense_share: number;
@@ -107,6 +109,7 @@ export async function getSettlementDays(
     ...d,
     cash: Number(d.cash),
     card: Number(d.card),
+    emisora: Number(d.emisora),
     card_to_boss: Number(d.card_to_boss),
     gross: Number(d.gross),
     expense_total: Number(d.expense_total),
@@ -119,13 +122,15 @@ export async function getSettlementDays(
 export function summarizeDays(days: SettlementDay[]): SettlementSummary {
   const total_cash = days.reduce((s, d) => s + d.cash, 0);
   const total_card = days.reduce((s, d) => s + d.card, 0);
+  const total_emisora = days.reduce((s, d) => s + d.emisora, 0);
   const card_to_boss = days.reduce((s, d) => s + d.card_to_boss, 0);
   const boss_due = days.reduce((s, d) => s + d.boss_fee, 0);
   const boss_expense_share = days.reduce((s, d) => s + d.boss_expense_share, 0);
   return {
     total_cash,
     total_card,
-    total_gross: total_cash + total_card,
+    total_emisora,
+    total_gross: total_cash + total_card + total_emisora,
     boss_due: round2(boss_due),
     boss_received: round2(card_to_boss),
     boss_expense_share: round2(boss_expense_share),
@@ -147,6 +152,7 @@ export interface RangeTransaction {
   amount: number;
   label: string;
   notes: string | null;
+  is_amex?: boolean;
 }
 
 /** Todas las transacciones del rango: ingresos (efectivo/datáfono) y gastos. */
@@ -158,7 +164,7 @@ export async function getRangeTransactions(
   const [inc, exp] = await Promise.all([
     supabase
       .from('income_entries')
-      .select('id, entry_date, method, amount, notes, created_at, emisora:emisoras(name)')
+      .select('id, entry_date, method, amount, notes, created_at, is_amex, emisora:emisoras(name)')
       .gte('entry_date', from)
       .lte('entry_date', to),
     supabase
@@ -178,6 +184,7 @@ export async function getRangeTransactions(
     amount: number;
     notes: string | null;
     created_at: string;
+    is_amex: boolean;
     emisora: { name: string } | null;
   };
   type ExpRow = {
@@ -205,8 +212,11 @@ export async function getRangeTransactions(
     label:
       e.method === 'emisora' && e.emisora?.name
         ? `${incomeLabel[e.method]} · ${e.emisora.name}`
-        : incomeLabel[e.method],
+        : e.method === 'card' && e.is_amex
+          ? 'Datáfono · AMEX'
+          : incomeLabel[e.method],
     notes: e.notes,
+    is_amex: e.method === 'card' ? e.is_amex : undefined,
   }));
 
   const expenses = (exp.data as unknown as ExpRow[]).map<RangeTransaction>((e) => ({
@@ -231,6 +241,7 @@ export interface DayTransactions {
   transactions: RangeTransaction[];
   totalCash: number;
   totalCard: number;
+  totalEmisora: number;
   totalExpenses: number;
 }
 
@@ -250,6 +261,9 @@ export function groupTransactionsByDay(txs: RangeTransaction[]): DayTransactions
     ),
     totalCard: round2(
       transactions.filter((t) => t.kind === 'card').reduce((s, t) => s + t.amount, 0),
+    ),
+    totalEmisora: round2(
+      transactions.filter((t) => t.kind === 'emisora').reduce((s, t) => s + t.amount, 0),
     ),
     totalExpenses: round2(
       transactions.filter((t) => t.kind === 'expense').reduce((s, t) => s + t.amount, 0),
