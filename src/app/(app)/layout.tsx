@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { BottomNav } from './bottom-nav';
+import { ThemeToggle } from './theme-toggle';
 
 export default async function AppLayout({
   children,
@@ -20,6 +21,7 @@ export default async function AppLayout({
           <span className="font-[family-name:var(--font-display)] text-lg font-extrabold">
             Taxi<span className="text-amber">Log</span>
           </span>
+          <ThemeToggle />
         </div>
       </header>
 
