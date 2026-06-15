@@ -86,6 +86,10 @@ export default function RegistroPage() {
   const [isFeeExempt, setIsFeeExempt] = useState(false);
   const [dayClosed, setDayClosed] = useState(false);
 
+  const [stickyMethod] = useState(
+    () => typeof window !== 'undefined' && localStorage.getItem('taxilog-sticky-method') === 'true',
+  );
+
   const [agreement, setAgreement] = useState<AgreementConfig | null | undefined>();
   const [settlement, setSettlement] = useState<SettlementSummary | null>(null);
   const [saving, setSaving] = useState(false);
@@ -154,7 +158,7 @@ export default function RegistroPage() {
     setAmount('');
     setEmisoraId('');
     setIsAmex(false);
-    setMethod('cash');
+    if (!stickyMethod) setMethod('cash');
     setEditingId(null);
   }
 

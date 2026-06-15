@@ -88,6 +88,9 @@ export default function ConfiguracionPage() {
   // ---------- Preferencias de informe ----------
   const [prefs, setPrefs] = useState<ReportPreferences>(DEFAULT_REPORT_PREFS);
 
+  // ---------- Preferencias de registro (localStorage) ----------
+  const [stickyMethod, setStickyMethod] = useState(false);
+
   // ---------- Acumulado del taxímetro (opcional) ----------
   const ODO_FIELDS = useMemo(
     () =>
@@ -132,6 +135,7 @@ export default function ConfiguracionPage() {
       }
       setEmisoras(emisorasList);
       setPrefs(savedPrefs);
+      setStickyMethod(localStorage.getItem('taxilog-sticky-method') === 'true');
       if (totals) {
         setOdo(
           Object.fromEntries(
@@ -363,7 +367,7 @@ export default function ConfiguracionPage() {
           <div className="grid grid-cols-3 gap-2">
             {(
               [
-                ['gasoline', 'Gasolina'],
+                ['gasoline', 'Común'],
                 ['electric', 'Eléctrico'],
                 ['eurotaxi', 'Eurotaxi'],
               ] as const
@@ -527,6 +531,23 @@ export default function ConfiguracionPage() {
         </div>
 
         {emisoraError && <p className="text-sm text-bad">{emisoraError}</p>}
+      </section>
+
+      {/* ---------- Preferencias de registro ---------- */}
+      <h2 className="rise-in-3 mt-2 text-xs uppercase tracking-widest text-muted">
+        Preferencias de registro
+      </h2>
+
+      <section className="card rise-in-3 flex flex-col gap-3 p-5">
+        <Toggle
+          label="Mantener método al guardar"
+          hint="Si está activo, tras guardar una carrera el método (efectivo, datáfono…) no cambia. Útil si añades varias del mismo tipo seguidas."
+          checked={stickyMethod}
+          onChange={(v) => {
+            setStickyMethod(v);
+            localStorage.setItem('taxilog-sticky-method', String(v));
+          }}
+        />
       </section>
 
       {/* ---------- Preferencias del informe del jefe ---------- */}
