@@ -2,6 +2,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type {
   DayTransactions,
+  RangeTransaction,
   ReportPreferences,
   SettlementDay,
   SettlementSummary,
@@ -31,6 +32,7 @@ export interface ReportInput {
   summary: SettlementSummary;
   prefs: ReportPreferences;
   cardGoesToBoss: boolean;
+  amexTransactions?: RangeTransaction[];
 }
 
 /** Construye el informe de liquidación para el jefe. Devuelve el documento. */
@@ -42,6 +44,7 @@ export function buildReportPdf({
   summary,
   prefs,
   cardGoesToBoss,
+  amexTransactions = [],
 }: ReportInput): jsPDF {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const amber: [number, number, number] = [204, 143, 0];
@@ -66,6 +69,7 @@ export function buildReportPdf({
   // ---------- Tabla día a día (columnas dinámicas según preferencias) ----------
   const visibleDays = prefs.show_rest_days ? days : days.filter((d) => !d.is_rest);
 
+  const hasEmisora = days.some((d) => d.emisora > 0);
   type Col = { header: string; render: (day: SettlementDay) => string; align?: 'right' };
   const columns: Col[] = [
     { header: 'Día', render: (day) => shortDate.format(parseLocal(day.d)) },
@@ -74,6 +78,9 @@ export function buildReportPdf({
     columns.push({ header: 'Efectivo', render: (day) => eur(day.cash), align: 'right' });
   }
   columns.push({ header: 'Datáfono', render: (day) => eur(day.card), align: 'right' });
+  if (hasEmisora) {
+    columns.push({ header: 'Emisora', render: (day) => day.emisora > 0 ? eur(day.emisora) : '—', align: 'right' });
+  }
   if (prefs.show_cash) {
     columns.push({ header: 'Bruto', render: (day) => eur(day.gross), align: 'right' });
   }
@@ -134,6 +141,9 @@ export function buildReportPdf({
     cardGoesToBoss ? 'Total datáfono (recibido por el jefe)' : 'Total datáfono',
     eur(summary.total_card),
   ]);
+  if ((summary.total_emisora ?? 0) > 0) {
+    lines.push(['Total emisoras (recibido por el jefe)', eur(summary.total_emisora ?? 0)]);
+  }
   if (prefs.show_cash) lines.push(['Total bruto', eur(summary.total_gross)]);
   lines.push(['Corresponde al jefe (cuotas)', eur(summary.boss_due)]);
   if (prefs.show_expenses && summary.boss_expense_share > 0) {
@@ -168,6 +178,45 @@ export function buildReportPdf({
     18,
     by + 3,
   );
+
+  // ---------- Sección AMEX (si hay pagos pendientes) ----------
+  if (amexTransactions.length > 0) {
+    const amexY = by + 20;
+    const needsNewPage = amexY > 230;
+    let ay = needsNewPage ? 20 : amexY;
+    if (needsNewPage) doc.addPage();
+
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('Pagos AMEX (pendientes de liquidar)', 14, ay);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.text('Estos pagos tardan más en llegar. No se incluyen en el balance hasta que liquiden.', 14, ay + 6);
+
+    autoTable(doc, {
+      startY: ay + 10,
+      head: [['Fecha', 'Importe', 'Notas']],
+      body: amexTransactions.map((t) => [
+        longDate.format(parseLocal(t.date)),
+        eur(t.amount),
+        t.notes ?? '—',
+      ]),
+      styles: { fontSize: 8.5, cellPadding: 2 },
+      headStyles: { fillColor: [176, 122, 0], textColor: [255, 255, 255], fontStyle: 'bold' },
+      columnStyles: { 1: { halign: 'right', cellWidth: 28 } },
+    });
+
+    const amexAfter =
+      (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? ay + 30;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(176, 122, 0);
+    const amexTotal = amexTransactions.reduce((s, t) => s + t.amount, 0);
+    doc.text(`Total AMEX: ${eur(amexTotal)}`, 14, amexAfter + 6);
+  }
 
   // ---------- Pie ----------
   doc.setFont('helvetica', 'normal');

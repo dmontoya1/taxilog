@@ -31,6 +31,7 @@ interface IncomeEntry {
   notes: string | null;
   created_at: string;
   emisora_id: string | null;
+  is_amex: boolean;
   emisora: { name: string } | null;
 }
 
@@ -51,6 +52,7 @@ interface Movement {
   amount: number;
   label: string;
   createdAt: string;
+  is_amex?: boolean;
 }
 
 const MOVEMENT_STYLE: Record<MovementKind, { icon: string; tint: string; sign: string }> = {
@@ -74,6 +76,7 @@ export default function RegistroPage() {
   const [method, setMethod] = useState<IncomeMethod>('cash');
   const [amount, setAmount] = useState('');
   const [emisoraId, setEmisoraId] = useState('');
+  const [isAmex, setIsAmex] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [entries, setEntries] = useState<IncomeEntry[]>([]);
@@ -113,7 +116,7 @@ export default function RegistroPage() {
         getActiveAgreement(supabase, date),
         supabase
           .from('income_entries')
-          .select('id, method, amount, notes, created_at, emisora_id, emisora:emisoras(name)')
+          .select('id, method, amount, notes, created_at, emisora_id, is_amex, emisora:emisoras(name)')
           .eq('entry_date', date)
           .order('created_at', { ascending: false }),
         supabase
@@ -150,6 +153,7 @@ export default function RegistroPage() {
   function resetForm() {
     setAmount('');
     setEmisoraId('');
+    setIsAmex(false);
     setMethod('cash');
     setEditingId(null);
   }
@@ -159,6 +163,7 @@ export default function RegistroPage() {
     setMethod(entry.method);
     setAmount(String(entry.amount));
     setEmisoraId(entry.emisora_id ?? '');
+    setIsAmex(entry.is_amex);
     setError(null);
   }
 
@@ -183,11 +188,12 @@ export default function RegistroPage() {
 
     const { data: userData } = await supabase.auth.getUser();
     const emisora_id = method === 'emisora' ? emisoraId : null;
+    const is_amex = method === 'card' ? isAmex : false;
 
     const { error: saveError } = editingId
       ? await supabase
           .from('income_entries')
-          .update({ method, amount: value, emisora_id })
+          .update({ method, amount: value, emisora_id, is_amex })
           .eq('id', editingId)
       : await supabase.from('income_entries').insert({
           user_id: userData.user!.id,
@@ -195,6 +201,7 @@ export default function RegistroPage() {
           method,
           amount: value,
           emisora_id,
+          is_amex,
         });
 
     if (saveError) {
@@ -273,6 +280,7 @@ export default function RegistroPage() {
           ? `${incomeLabel[e.method]} · ${e.emisora.name}`
           : incomeLabel[e.method],
       createdAt: e.created_at,
+      is_amex: e.method === 'card' ? e.is_amex : undefined,
     })),
     ...dayExpenses.map<Movement>((e) => ({
       kind: 'expense',
@@ -414,6 +422,7 @@ export default function RegistroPage() {
                 onClick={() => {
                   setMethod(value);
                   if (value !== 'emisora') setEmisoraId('');
+                  if (value !== 'card') setIsAmex(false);
                 }}
                 className={`rounded-xl border px-2 py-3 text-xs font-semibold transition-colors ${
                   method === value
@@ -425,6 +434,20 @@ export default function RegistroPage() {
               </button>
             ))}
           </div>
+
+          {method === 'card' && (
+            <label className="flex items-center justify-between gap-3 rounded-xl bg-bg px-4 py-3">
+              <span className="text-sm">
+                Pago con American Express (AMEX)
+              </span>
+              <input
+                type="checkbox"
+                checked={isAmex}
+                onChange={(e) => setIsAmex(e.target.checked)}
+                className="h-5 w-5 accent-[var(--amber)]"
+              />
+            </label>
+          )}
 
           {method === 'emisora' &&
             (activeEmisoras.length > 0 ? (
@@ -516,7 +539,14 @@ export default function RegistroPage() {
                 <div className="flex items-center gap-3">
                   <span className="text-xl">{style.icon}</span>
                   <div>
-                    <p className="text-sm font-semibold">{m.label}</p>
+                    <p className="text-sm font-semibold">
+                      {m.label}
+                      {m.is_amex && (
+                        <span className="ml-1.5 rounded bg-amber-soft px-1.5 py-0.5 text-xs text-amber">
+                          AMEX
+                        </span>
+                      )}
+                    </p>
                     <p className="text-xs text-muted">
                       {new Date(m.createdAt).toLocaleTimeString('es-ES', {
                         hour: '2-digit',
