@@ -47,6 +47,12 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <body className={`${display.variable} ${body.variable} ${meter.variable}`}>
+        {/* Lee localStorage antes de que React pinte para evitar parpadeo de tema */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem('taxilog-theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}`,
+          }}
+        />
         {children}
         <Analytics />
       </body>
