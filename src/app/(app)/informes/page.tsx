@@ -120,14 +120,21 @@ export default function InformesPage() {
   }
 
   async function handleExportDetail() {
-    if (!detail) return;
+    if (!detail || !days || !summary) return;
     setExporting('detail');
     try {
       const [{ buildDetailedReportPdf, sharePdf }, driverName] = await Promise.all([
         import('@/lib/report/pdf'),
         getDriverName(),
       ]);
-      const doc = buildDetailedReportPdf({ driverName, from, to, days: detail });
+      const doc = buildDetailedReportPdf({
+        driverName,
+        from,
+        to,
+        days: detail,
+        settlementDays: days,
+        summary,
+      });
       await sharePdf(doc, `detalle_${from}_${to}.pdf`);
     } catch {
       setError('No se pudo generar el PDF. Inténtalo de nuevo.');
