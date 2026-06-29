@@ -196,3 +196,48 @@ body {
 [data-theme='light'] .card {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
 }
+
+/* ---------- Animaciones de Toast, Modales y Hojas (Freemium) ---------- */
+@keyframes toast-slide-up {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-toast-slide-up {
+  animation: toast-slide-up 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out forwards;
+}
+
+@keyframes sheet-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-sheet-slide-up {
+  animation: sheet-slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+

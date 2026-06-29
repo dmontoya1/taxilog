@@ -15,6 +15,7 @@ import {
   type SettlementDay,
   type TransactionKind,
 } from '@/lib/domain/settlement';
+import { useToast } from '@/components/ui/toast';
 
 const MONTH_LABEL = new Intl.DateTimeFormat('es-ES', { month: 'short', year: '2-digit' });
 const DAY_LABEL = new Intl.DateTimeFormat('es-ES', {
@@ -49,6 +50,7 @@ function recentMonths(): Array<{ label: string; from: string; to: string }> {
 export default function InformesPage() {
   const supabase = useMemo(() => createClient(), []);
   const months = useMemo(recentMonths, []);
+  const { subscriptionStatus, openUpgradeModal } = useToast();
 
   const [from, setFrom] = useState(months[0].from);
   const [to, setTo] = useState(months[0].to);

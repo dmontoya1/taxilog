@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { currentWorkday } from '@/lib/domain/rest-days';
 import { euro } from '@/lib/domain/settlement';
+import { useToast } from '@/components/ui/toast';
 
 interface Category {
   id: string;
@@ -25,6 +26,7 @@ interface Expense {
 function GastosInner() {
   const supabase = useMemo(() => createClient(), []);
   const searchParams = useSearchParams();
+  const { success, error: toastError } = useToast();
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [recent, setRecent] = useState<Expense[]>([]);
@@ -74,6 +76,15 @@ function GastosInner() {
     setEditingId(null);
   }
 
+  function handleQuickAmount(val: number, isAdditive: boolean) {
+    if (isAdditive) {
+      const current = Number(amount) || 0;
+      setAmount((current + val).toFixed(2).replace(/\.00$/, ''));
+    } else {
+      setAmount(String(val));
+    }
+  }
+
   function startEdit(e: Expense) {
     setEditingId(e.id);
     setDate(e.expense_date);
@@ -86,6 +97,7 @@ function GastosInner() {
 
   async function handleSave() {
     if (!amount || Number(amount) <= 0) {
+      toastError('Indica el monto del gasto.');
       setError('Indica el monto del gasto.');
       return;
     }
@@ -101,16 +113,19 @@ function GastosInner() {
       notes: notes.trim() || null,
     };
 
+    const isEdit = !!editingId;
     const { error: saveError } = editingId
       ? await supabase.from('expenses').update(payload).eq('id', editingId)
       : await supabase.from('expenses').insert({ user_id: userData.user!.id, ...payload });
 
     if (saveError) {
+      toastError('No se pudo guardar el gasto. Inténtalo de nuevo.');
       setError('No se pudo guardar el gasto. Inténtalo de nuevo.');
       setSaving(false);
       return;
     }
 
+    success(isEdit ? '¡Cambios guardados con éxito!' : '¡Gasto añadido con éxito!');
     resetForm();
     setSaving(false);
     await load();
@@ -118,7 +133,12 @@ function GastosInner() {
 
   async function handleDelete(id: string) {
     if (editingId === id) resetForm();
-    await supabase.from('expenses').delete().eq('id', id);
+    const { error: deleteError } = await supabase.from('expenses').delete().eq('id', id);
+    if (deleteError) {
+      toastError('No se pudo eliminar el gasto.');
+    } else {
+      success('Gasto eliminado.');
+    }
     await load();
   }
 
@@ -167,6 +187,29 @@ function GastosInner() {
 
         <label className="flex flex-col gap-1.5">
           <span className="text-sm text-muted">Monto</span>
+          <div className="flex flex-wrap gap-1.5 text-xs pt-0.5 pb-1">
+            <button
+              type="button"
+              onClick={() => handleQuickAmount(10, true)}
+              className="rounded-full bg-surface-2 border border-line px-3 py-1.5 hover:border-amber hover:text-amber active:scale-95 transition-all text-muted font-semibold cursor-pointer"
+            >
+              +10€ (Lavado)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickAmount(20, true)}
+              className="rounded-full bg-surface-2 border border-line px-3 py-1.5 hover:border-amber hover:text-amber active:scale-95 transition-all text-muted font-semibold cursor-pointer"
+            >
+              +20€
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickAmount(50, true)}
+              className="rounded-full bg-surface-2 border border-line px-3 py-1.5 hover:border-amber hover:text-amber active:scale-95 transition-all text-muted font-semibold cursor-pointer"
+            >
+              +50€ (Combustible)
+            </button>
+          </div>
           <input
             type="number"
             inputMode="decimal"
