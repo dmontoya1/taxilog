@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Bricolage_Grotesque, Figtree, IBM_Plex_Mono } from 'next/font/google';
 import { Analytics } from '@vercel/analytics/next';
+import { ToastProvider } from '@/components/ui/toast';
 import './globals.css';
 
 const display = Bricolage_Grotesque({
@@ -45,15 +46,17 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es" suppressHydrationWarning>
+    <html lang="es" data-theme="light" suppressHydrationWarning>
       <body className={`${display.variable} ${body.variable} ${meter.variable}`}>
         {/* Lee localStorage antes de que React pinte para evitar parpadeo de tema */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{var t=localStorage.getItem('taxilog-theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}`,
+            __html: `try{var t=localStorage.getItem('taxilog-theme');if(t==='dark')document.documentElement.removeAttribute('data-theme');}catch(e){}`,
           }}
         />
-        {children}
+        <ToastProvider>
+          {children}
+        </ToastProvider>
         <Analytics />
       </body>
     </html>

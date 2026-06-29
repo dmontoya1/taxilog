@@ -17,6 +17,7 @@ import {
 } from '@/lib/domain/settlement';
 import { useCountUp } from '../use-count-up';
 import { CloseDaySheet } from './close-day-sheet';
+import { useToast } from '@/components/ui/toast';
 
 const DAY_LABEL = new Intl.DateTimeFormat('es-ES', {
   weekday: 'long',
@@ -96,6 +97,8 @@ export default function RegistroPage() {
   const [showCloseSheet, setShowCloseSheet] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const { success, error: toastError, subscriptionStatus, openUpgradeModal } = useToast();
+
   const activeEmisoras = emisoras.filter((e) => e.is_active);
 
   const localDay = parseLocalDate(date);
@@ -171,18 +174,37 @@ export default function RegistroPage() {
     setError(null);
   }
 
+  function handleQuickAmount(val: number, isAdditive: boolean) {
+    if (typeof window !== 'undefined' && navigator.vibrate) {
+      try {
+        navigator.vibrate(15);
+      } catch {
+        // Ignorar
+      }
+    }
+    if (isAdditive) {
+      const current = Number(amount) || 0;
+      setAmount((current + val).toFixed(2).replace(/\.00$/, ''));
+    } else {
+      setAmount(String(val));
+    }
+  }
+
   async function handleSaveEntry() {
     const value = Number(amount);
     if (!value || value <= 0) {
+      toastError('Indica el monto de la carrera o cobro.');
       setError('Indica el monto de la carrera o cobro.');
       return;
     }
     if (method === 'emisora') {
       if (activeEmisoras.length === 0) {
+        toastError('No tienes emisoras configuradas. Añádelas en Configuración.');
         setError('No tienes emisoras configuradas. Añádelas en Configuración.');
         return;
       }
       if (!emisoraId) {
+        toastError('Elige la emisora de la carrera.');
         setError('Elige la emisora de la carrera.');
         return;
       }
@@ -194,6 +216,7 @@ export default function RegistroPage() {
     const emisora_id = method === 'emisora' ? emisoraId : null;
     const is_amex = method === 'card' ? isAmex : false;
 
+    const isEdit = !!editingId;
     const { error: saveError } = editingId
       ? await supabase
           .from('income_entries')
@@ -209,11 +232,13 @@ export default function RegistroPage() {
         });
 
     if (saveError) {
+      toastError('No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.');
       setError('No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.');
       setSaving(false);
       return;
     }
 
+    success(isEdit ? '¡Movimiento actualizado con éxito!' : '¡Cobro guardado con éxito!');
     resetForm();
     setSaving(false);
     await loadDay();
@@ -232,7 +257,12 @@ export default function RegistroPage() {
   async function handleDeleteMovement(kind: MovementKind, id: string) {
     const table = kind === 'expense' ? 'expenses' : 'income_entries';
     if (editingId === id) resetForm();
-    await supabase.from(table).delete().eq('id', id);
+    const { error: delError } = await supabase.from(table).delete().eq('id', id);
+    if (delError) {
+      toastError('No se pudo eliminar el movimiento.');
+    } else {
+      success('Movimiento eliminado.');
+    }
     await loadDay();
   }
 
@@ -419,24 +449,26 @@ export default function RegistroPage() {
             </div>
           )}
           <div className="grid grid-cols-3 gap-2">
-            {METHOD_TABS.map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => {
-                  setMethod(value);
-                  if (value !== 'emisora') setEmisoraId('');
-                  if (value !== 'card') setIsAmex(false);
-                }}
-                className={`rounded-xl border px-2 py-3 text-xs font-semibold transition-colors ${
-                  method === value
-                    ? 'border-amber bg-amber-soft text-amber'
-                    : 'border-line text-muted'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+            {METHOD_TABS.map(([value, label]) => {
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setMethod(value);
+                    if (value !== 'emisora') setEmisoraId('');
+                    if (value !== 'card') setIsAmex(false);
+                  }}
+                  className={`rounded-xl border px-2 py-3 text-xs font-semibold transition-colors flex items-center justify-center gap-1 ${
+                    method === value
+                      ? 'border-amber bg-amber-soft text-amber'
+                      : 'border-line text-muted'
+                  }`}
+                >
+                  <span>{label}</span>
+                </button>
+              );
+            })}
           </div>
 
           {method === 'card' && (
@@ -476,6 +508,68 @@ export default function RegistroPage() {
                 .
               </p>
             ))}
+
+          {/* Botones de acceso rápido para ingresos */}
+          <div className="flex flex-wrap gap-1.5 text-xs pt-1 w-full items-center">
+            <button
+              type="button"
+              onClick={() => handleQuickAmount(1, true)}
+              className="rounded-full bg-surface-2 border border-line px-3 py-1.5 hover:border-amber hover:text-amber active:scale-95 transition-all text-muted font-semibold cursor-pointer"
+            >
+              +1€
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickAmount(2, true)}
+              className="rounded-full bg-surface-2 border border-line px-3 py-1.5 hover:border-amber hover:text-amber active:scale-95 transition-all text-muted font-semibold cursor-pointer"
+            >
+              +2€
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickAmount(5, true)}
+              className="rounded-full bg-surface-2 border border-line px-3 py-1.5 hover:border-amber hover:text-amber active:scale-95 transition-all text-muted font-semibold cursor-pointer"
+            >
+              +5€
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickAmount(10, true)}
+              className="rounded-full bg-surface-2 border border-line px-3 py-1.5 hover:border-amber hover:text-amber active:scale-95 transition-all text-muted font-semibold cursor-pointer"
+            >
+              +10€
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickAmount(20, true)}
+              className="rounded-full bg-surface-2 border border-line px-3 py-1.5 hover:border-amber hover:text-amber active:scale-95 transition-all text-muted font-semibold cursor-pointer"
+            >
+              +20€
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickAmount(33, false)}
+              className="rounded-full bg-surface-2 border border-line px-3 py-1.5 hover:border-amber hover:text-amber active:scale-95 transition-all text-muted font-semibold cursor-pointer"
+            >
+              ✈️ Aero 33€
+            </button>
+            {amount && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window !== 'undefined' && navigator.vibrate) {
+                    try {
+                      navigator.vibrate(10);
+                    } catch {}
+                  }
+                  setAmount('');
+                }}
+                className="rounded-full bg-bad-soft border border-bad/30 px-3 py-1.5 hover:border-bad hover:text-bad active:scale-95 transition-all text-bad font-semibold cursor-pointer ml-auto"
+              >
+                ✕ Limpiar
+              </button>
+            )}
+          </div>
 
           <div className="flex gap-2">
             <input
