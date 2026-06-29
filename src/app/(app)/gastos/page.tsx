@@ -77,6 +77,13 @@ function GastosInner() {
   }
 
   function handleQuickAmount(val: number, isAdditive: boolean) {
+    if (typeof window !== 'undefined' && navigator.vibrate) {
+      try {
+        navigator.vibrate(15);
+      } catch {
+        // Ignorar
+      }
+    }
     if (isAdditive) {
       const current = Number(amount) || 0;
       setAmount((current + val).toFixed(2).replace(/\.00$/, ''));
@@ -187,7 +194,28 @@ function GastosInner() {
 
         <label className="flex flex-col gap-1.5">
           <span className="text-sm text-muted">Monto</span>
-          <div className="flex flex-wrap gap-1.5 text-xs pt-0.5 pb-1">
+          <div className="flex flex-wrap gap-1.5 text-xs pt-0.5 pb-1 w-full items-center">
+            <button
+              type="button"
+              onClick={() => handleQuickAmount(1, true)}
+              className="rounded-full bg-surface-2 border border-line px-3 py-1.5 hover:border-amber hover:text-amber active:scale-95 transition-all text-muted font-semibold cursor-pointer"
+            >
+              +1€
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickAmount(2, true)}
+              className="rounded-full bg-surface-2 border border-line px-3 py-1.5 hover:border-amber hover:text-amber active:scale-95 transition-all text-muted font-semibold cursor-pointer"
+            >
+              +2€
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickAmount(5, true)}
+              className="rounded-full bg-surface-2 border border-line px-3 py-1.5 hover:border-amber hover:text-amber active:scale-95 transition-all text-muted font-semibold cursor-pointer"
+            >
+              +5€
+            </button>
             <button
               type="button"
               onClick={() => handleQuickAmount(10, true)}
@@ -209,6 +237,22 @@ function GastosInner() {
             >
               +50€ (Combustible)
             </button>
+            {amount && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window !== 'undefined' && navigator.vibrate) {
+                    try {
+                      navigator.vibrate(10);
+                    } catch {}
+                  }
+                  setAmount('');
+                }}
+                className="rounded-full bg-bad-soft border border-bad/30 px-3 py-1.5 hover:border-bad hover:text-bad active:scale-95 transition-all text-bad font-semibold cursor-pointer ml-auto"
+              >
+                ✕ Limpiar
+              </button>
+            )}
           </div>
           <input
             type="number"
